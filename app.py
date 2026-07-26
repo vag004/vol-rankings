@@ -163,6 +163,7 @@ with st.sidebar:
     min_iv_vs_20d   = st.slider("Min IV vs 20D Hist IV",  -20, 20, 0, help="IV30 vs its own 20-day average — positive = currently elevated")
     min_oi_rank     = st.slider("Min OI Rank %",         0, 100, 0,  help="Minimum open interest rank for liquidity (0 = no filter)")
     min_prem_yield  = st.slider("Min Prem Yield % (ann.)",0, 30, 10,  help="Annualised yield on the 25-delta put: (bid/strike) × (365/DTE). Filter out low-premium setups.")
+    min_mktcap_b    = st.slider("Min Market Cap ($B)",    0, 100, 5,  help="Minimum market cap in billions — filters out micro-caps with thin option markets")
     earn_buffer     = st.slider("Earnings buffer (days)", 0, 21, 7,  help="Avoid tickers with earnings within this many days")
 
     st.divider()
@@ -338,6 +339,11 @@ with tab1:
             try:
                 d = hv_rows[sym]
                 tk = yf.Ticker(sym)
+                try:
+                    mktcap = tk.fast_info.market_cap
+                    mktcap_b = round(mktcap / 1e9, 1) if mktcap else None
+                except:
+                    mktcap_b = None
                 iv30, iv_dte, total_oi, target_put = get_iv30_and_oi(tk, d["price"])
                 put_strike = target_put[0] if target_put else None
                 put_bid    = target_put[1] if target_put else None
@@ -373,6 +379,7 @@ with tab1:
                 earn_str = EARNINGS.get(sym, "—")
                 rows.append({
                     "Symbol":         sym,
+                    "Mkt Cap $B":     mktcap_b,
                     "Price":          d["price"],
                     "1D %":           d["price_chg"],
                     "25D Strike":     put_strike,
@@ -433,6 +440,8 @@ with tab1:
             df = df[df["OI Rank %"].fillna(0) >= min_oi_rank]
         if min_prem_yield > 0 and "Prem Yield%" in df.columns:
             df = df[df["Prem Yield%"].fillna(0) >= min_prem_yield]
+        if min_mktcap_b > 0 and "Mkt Cap $B" in df.columns:
+            df = df[df["Mkt Cap $B"].fillna(0) >= min_mktcap_b]
 
         if df.empty:
             st.warning("No rows match current filters.")
@@ -472,7 +481,7 @@ with tab1:
 """)
 
             display_cols = [
-                "Symbol","Price","1D %",
+                "Symbol","Mkt Cap $B","Price","1D %",
                 "25D Strike","Put Bid","Delta","Prem Yield%",
                 "IV30","20D Hist IV","IV vs 20D",
                 "20D HV","IV Rank %","52wk IV Range",
@@ -534,6 +543,7 @@ with tab1:
                 return "color:#f87171"
 
             fmt = {
+                "Mkt Cap $B":    lambda x: f"${x:.0f}B" if pd.notna(x) else "—",
                 "Price":         "${:.2f}",
                 "25D Strike":    "${:.2f}",
                 "Put Bid":       "${:.2f}",
