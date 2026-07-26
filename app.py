@@ -156,6 +156,7 @@ with st.sidebar:
     min_iv_hv_gap   = st.slider("Min IV−HV Gap (pts)",  0, 30,  5,   help="IV30 must exceed 20D HV by at least this many vol points")
     min_iv_vs_20d   = st.slider("Min IV vs 20D Hist IV",  -20, 20, 0, help="IV30 vs its own 20-day average — positive = currently elevated")
     min_oi_rank     = st.slider("Min OI Rank %",         0, 100, 0,  help="Minimum open interest rank for liquidity (0 = no filter)")
+    min_prem_yield  = st.slider("Min Prem Yield % (ann.)",0, 30,  0,  help="Annualised yield on the 25-delta put: (bid/strike) × (365/DTE). Filter out low-premium setups.")
     earn_buffer     = st.slider("Earnings buffer (days)", 0, 21, 7,  help="Avoid tickers with earnings within this many days")
 
     st.divider()
@@ -192,27 +193,48 @@ def calc_hv_ivr(hv_series):
     return round((cur - lo) / (hi - lo) * 100, 1)
 
 def get_iv30_and_oi(tk, price):
-    """ATM put IV from nearest 20-40 DTE expiry + total open interest."""
+    """ATM put IV from nearest 20-40 DTE expiry + total open interest + 25-delta put details."""
     try:
         today = date.today()
         total_oi = 0
         iv30, iv_dte = None, None
+        target_put = None  # (strike, bid, delta, dte, prem_yield)
         for i, exp in enumerate(tk.options[:5]):
             dte = (datetime.strptime(exp, "%Y-%m-%d").date() - today).days
             if dte > 75:
                 break
             chain = tk.option_chain(exp)
             total_oi += int(chain.calls["openInterest"].fillna(0).sum() + chain.puts["openInterest"].fillna(0).sum())
-            if iv30 is None and 20 <= dte <= 45:
+            if 20 <= dte <= 45:
                 puts = chain.puts[chain.puts["bid"] > 0].copy()
                 if not puts.empty:
-                    puts["dist"] = abs(puts["strike"] - price)
-                    atm = puts.loc[puts["dist"].idxmin()]
-                    iv30 = round(float(atm["impliedVolatility"]) * 100, 1)
-                    iv_dte = int(dte)
-        return iv30, iv_dte, total_oi if total_oi > 0 else None
+                    if iv30 is None:
+                        puts_atm = puts.copy()
+                        puts_atm["dist"] = abs(puts_atm["strike"] - price)
+                        atm = puts_atm.loc[puts_atm["dist"].idxmin()]
+                        iv30 = round(float(atm["impliedVolatility"]) * 100, 1)
+                        iv_dte = int(dte)
+                    # Find 25-delta put: look for strike ~10-20% OTM with delta closest to -0.25
+                    if target_put is None and "delta" in puts.columns:
+                        puts["delta_dist"] = abs(puts["delta"].fillna(0) + 0.25)
+                        best = puts.loc[puts["delta_dist"].idxmin()]
+                        strike = round(float(best["strike"]), 2)
+                        bid    = round(float(best["bid"]), 2)
+                        delta  = round(float(best["delta"]), 2) if pd.notna(best.get("delta")) else None
+                        prem_yield = round((bid / strike) * (365 / dte) * 100, 1) if bid > 0 and dte > 0 else None
+                        target_put = (strike, bid, delta, int(dte), prem_yield)
+                    elif target_put is None:
+                        # No delta column: use 15% OTM strike as proxy for ~25 delta
+                        target_strike = price * 0.85
+                        puts["dist"] = abs(puts["strike"] - target_strike)
+                        best = puts.loc[puts["dist"].idxmin()]
+                        strike = round(float(best["strike"]), 2)
+                        bid    = round(float(best["bid"]), 2)
+                        prem_yield = round((bid / strike) * (365 / dte) * 100, 1) if bid > 0 and dte > 0 else None
+                        target_put = (strike, bid, None, int(dte), prem_yield)
+        return iv30, iv_dte, total_oi if total_oi > 0 else None, target_put
     except:
-        return None, None, None
+        return None, None, None, None
 
 def get_option_volume(tk):
     try:
@@ -310,7 +332,11 @@ with tab1:
             try:
                 d = hv_rows[sym]
                 tk = yf.Ticker(sym)
-                iv30, iv_dte, total_oi = get_iv30_and_oi(tk, d["price"])
+                iv30, iv_dte, total_oi, target_put = get_iv30_and_oi(tk, d["price"])
+                put_strike = target_put[0] if target_put else None
+                put_bid    = target_put[1] if target_put else None
+                put_delta  = target_put[2] if target_put else None
+                put_prem_yield = target_put[4] if target_put else None
                 opt_vol = get_option_volume(tk)
 
                 # Record snapshot for building history
@@ -343,6 +369,10 @@ with tab1:
                     "Symbol":         sym,
                     "Price":          d["price"],
                     "1D %":           d["price_chg"],
+                    "25D Strike":     put_strike,
+                    "Put Bid":        put_bid,
+                    "Delta":          put_delta,
+                    "Prem Yield%":    put_prem_yield,
                     "IV30":           iv30,
                     "20D Hist IV":    hist_iv_20d,
                     "IV vs 20D":      round(iv30 - hist_iv_20d, 1) if iv30 and hist_iv_20d else None,
@@ -395,6 +425,8 @@ with tab1:
             df = df[df["IV vs 20D"].fillna(-99) >= min_iv_vs_20d]
         if min_oi_rank > 0:
             df = df[df["OI Rank %"].fillna(0) >= min_oi_rank]
+        if min_prem_yield > 0:
+            df = df[df["Prem Yield%"].fillna(0) >= min_prem_yield]
 
         if df.empty:
             st.warning("No rows match current filters.")
@@ -417,6 +449,10 @@ with tab1:
                 st.markdown("""
 | Column | What it means |
 |---|---|
+| **25D Strike** | The put strike closest to 25 delta — the standard sweet spot for put selling |
+| **Put Bid** | Current bid price for that 25-delta put — what you actually collect |
+| **Delta** | Actual delta (probability of assignment, roughly) |
+| **Prem Yield%** | Annualised return on capital: (bid/strike) × (365/DTE) — the real edge metric |
 | **IV30** | Current implied vol for ~30-day options — your premium income rate |
 | **20D Hist IV** | Average IV30 over past 20 days — is today's IV elevated vs recent? |
 | **IV vs 20D** | IV30 minus 20D Hist IV — positive = IV spiked above recent norm |
@@ -429,7 +465,9 @@ with tab1:
 """)
 
             display_cols = [
-                "Symbol","Price","1D %","IV30","20D Hist IV","IV vs 20D",
+                "Symbol","Price","1D %",
+                "25D Strike","Put Bid","Delta","Prem Yield%",
+                "IV30","20D Hist IV","IV vs 20D",
                 "20D HV","1Y HV","IV Rank %","52wk IV Range",
                 "IV−HV Gap","OI Rank %","Option Vol","Earnings","Days to Earn",
                 "Catalyst","Action"
@@ -478,8 +516,20 @@ with tab1:
                 if pd.isna(val): return ""
                 return "color:#4ade80" if float(val) >= 0 else "color:#f87171"
 
+            def colour_prem_yield(val):
+                if pd.isna(val): return ""
+                v = float(val)
+                if v >= 15: return "color:#4ade80;font-weight:bold"
+                if v >= 8:  return "color:#86efac"
+                if v >= 4:  return "color:#facc15"
+                return "color:#f87171"
+
             fmt = {
                 "Price":         "${:.2f}",
+                "25D Strike":    "${:.2f}",
+                "Put Bid":       "${:.2f}",
+                "Delta":         lambda x: f"{x:.2f}" if pd.notna(x) else "—",
+                "Prem Yield%":   lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
                 "1D %":          "{:+.2f}%",
                 "IV30":          "{:.1f}%",
                 "20D Hist IV":   "{:.1f}%",
@@ -495,14 +545,16 @@ with tab1:
 
             subset_cols = [c for c in ["IV vs 20D","IV−HV Gap","OI Rank %","1D %","IV Rank %","Action"] if c in df_show.columns]
 
+            prem_yield_cols = [c for c in ["Prem Yield%"] if c in df_show.columns]
             styled = (
                 df_show.style
-                .map(colour_ivr,    subset=["IV Rank %"])
-                .map(colour_action, subset=["Action"])
-                .map(colour_gap,    subset=["IV−HV Gap"])
-                .map(colour_vs20d,  subset=["IV vs 20D"])
-                .map(colour_oi_rank,subset=["OI Rank %"])
-                .map(colour_1d,     subset=["1D %"])
+                .map(colour_ivr,        subset=["IV Rank %"])
+                .map(colour_action,     subset=["Action"])
+                .map(colour_gap,        subset=["IV−HV Gap"])
+                .map(colour_vs20d,      subset=["IV vs 20D"])
+                .map(colour_oi_rank,    subset=["OI Rank %"])
+                .map(colour_1d,         subset=["1D %"])
+                .map(colour_prem_yield, subset=prem_yield_cols)
                 .format(fmt, na_rep="—")
             )
             st.dataframe(styled, use_container_width=True, height=620, hide_index=True)
