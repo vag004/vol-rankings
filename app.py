@@ -282,10 +282,29 @@ def get_option_volume(tk):
     except:
         return None
 
-def days_to_earnings(sym):
-    if sym not in EARNINGS:
+def fetch_next_earnings(tk, sym):
+    """Try yfinance calendar first, fall back to hardcoded EARNINGS dict."""
+    try:
+        cal = tk.calendar
+        if cal is not None and "Earnings Date" in cal:
+            dates = cal["Earnings Date"]
+            if dates is not None and len(dates) > 0:
+                d = dates[0]
+                if hasattr(d, "date"):
+                    d = d.date()
+                elif isinstance(d, str):
+                    d = datetime.strptime(d[:10], "%Y-%m-%d").date()
+                if d >= date.today():
+                    return d.isoformat()
+    except:
+        pass
+    return EARNINGS.get(sym)
+
+def days_to_earnings(sym, earn_date_str=None):
+    s = earn_date_str or EARNINGS.get(sym)
+    if not s:
         return None
-    return (datetime.strptime(EARNINGS[sym], "%Y-%m-%d").date() - date.today()).days
+    return (datetime.strptime(s, "%Y-%m-%d").date() - date.today()).days
 
 def classify(prem_yield, dte_earn, above_ma200, above_ma50, rsi, ret_30d,
              iv30, hv20, hist_iv, p_earn_buf=7, p_min_yield=10):
@@ -453,6 +472,7 @@ If it falls below, you buy the stock at the strike — so only sell puts on stoc
                     mktcap_b = round(mktcap / 1e9, 1) if mktcap else None
                 except:
                     mktcap_b = None
+                earn_date_str = fetch_next_earnings(tk, sym)
                 iv30, iv_dte, total_oi, target_put, pc_ratio = get_iv30_and_oi(tk, d["price"])
                 put_strike     = target_put[0] if target_put else None
                 put_bid        = target_put[1] if target_put else None
@@ -479,14 +499,14 @@ If it falls below, you buy the stock at the strike — so only sell puts on stoc
                 else:
                     iv_52wk_pos = None
 
-                dte_earn = days_to_earnings(sym)
+                dte_earn = days_to_earnings(sym, earn_date_str)
                 catalyst, action, sig_color = classify(
                     put_prem_yield, dte_earn,
                     d["above_ma200"], d["above_ma50"], d["rsi"], d["ret_30d"],
                     iv30, d["hv20"], hist_iv_20d,
                     p_earn_buf=earn_buffer, p_min_yield=min_prem_yield
                 )
-                earn_str = EARNINGS.get(sym, "—")
+                earn_str = earn_date_str or "—"
                 rows.append({
                     "Symbol":         sym,
                     "Mkt Cap $B":     mktcap_b,
