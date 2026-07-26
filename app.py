@@ -468,11 +468,14 @@ with tab1:
                 "Symbol","Price","1D %",
                 "25D Strike","Put Bid","Delta","Prem Yield%",
                 "IV30","20D Hist IV","IV vs 20D",
-                "20D HV","1Y HV","IV Rank %","52wk IV Range",
-                "IV−HV Gap","OI Rank %","Option Vol","Earnings","Days to Earn",
+                "20D HV","IV Rank %","52wk IV Range",
+                "IV−HV Gap","OI Rank %","Days to Earn",
                 "Catalyst","Action"
             ]
             df_show = df[[c for c in display_cols if c in df.columns]].copy()
+            # Drop columns where more than 80% of values are missing
+            thresh = int(len(df_show) * 0.2)
+            df_show = df_show.dropna(axis=1, thresh=max(thresh, 1))
 
             def colour_ivr(val):
                 if pd.isna(val): return ""
