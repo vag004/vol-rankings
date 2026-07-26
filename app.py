@@ -165,15 +165,18 @@ with st.sidebar:
     run_btn     = st.button("🔄 Refresh Rankings", use_container_width=True)
 
     st.divider()
-    st.subheader("📐 Signal Thresholds")
-    st.caption("Tune what counts as a SELL PUTS signal")
-    min_ivr         = st.slider("Min IV Rank %",        0, 100, 50,  help="IV must be in top X% of its 52-week range")
-    min_iv_hv_gap   = st.slider("Min IV−HV Gap (pts)",  0, 30,  5,   help="IV30 must exceed 20D HV by at least this many vol points")
-    min_iv_vs_20d   = st.slider("Min IV vs 20D Hist IV",  -20, 20, 0, help="IV30 vs its own 20-day average — positive = currently elevated")
-    min_oi_rank     = st.slider("Min OI Rank %",         0, 100, 0,  help="Minimum open interest rank for liquidity (0 = no filter)")
-    min_prem_yield  = st.slider("Min Prem Yield % (ann.)",0, 30, 10,  help="Annualised yield on the 25-delta put: (bid/strike) × (365/DTE). Filter out low-premium setups.")
-    min_mktcap_b    = st.slider("Min Market Cap ($B)",    0, 100, 5,  help="Minimum market cap in billions — filters out micro-caps with thin option markets")
-    earn_buffer     = st.slider("Earnings buffer (days)", 0, 21, 7,  help="Avoid tickers with earnings within this many days")
+    st.subheader("📐 Filters")
+    st.caption("Yield-first — premium is the primary signal")
+    min_prem_yield  = st.slider("Min Prem Yield % (ann.)", 0, 40, 15, help="(bid/strike) × (365/DTE) — primary filter. 15%+ = real premium")
+    min_mktcap_b    = st.slider("Min Market Cap ($B)",      0, 100, 5, help="Filters micro-caps with thin option markets")
+    earn_buffer     = st.slider("Earnings buffer (days)",   0, 21,  7, help="Avoid selling puts within this many days of earnings")
+    max_spread_pct  = st.slider("Max Spread % (liquidity)", 0, 50, 30, help="Bid-ask spread as % of mid — lower = more liquid. 30% = loose filter")
+    st.divider()
+    st.subheader("🔬 Context filters (optional)")
+    st.caption("Refine by technicals — set to 0/max to disable")
+    min_rsi         = st.slider("Min RSI",  0,  50, 25, help="Below 25 = panic/collapse. 25-40 = fear dip sweet spot")
+    max_rsi         = st.slider("Max RSI", 50, 100, 70, help="Above 70 = overbought, IV often low")
+    max_ret_30d     = st.slider("Max 30D Return %", -80, 0, -5, help="Only show stocks that have pulled back (negative return)")
 
     st.divider()
     if cache_ok(cache, "rankings"):
@@ -199,7 +202,6 @@ def calc_hv(close_series, days):
     return round(float(lr.tail(days).std() * np.sqrt(252) * 100), 1)
 
 def calc_hv_ivr(hv_series):
-    """Fallback IVR from rolling HV (used until real IV history builds up)."""
     s = hv_series.dropna()
     if s.empty:
         return None
@@ -208,49 +210,63 @@ def calc_hv_ivr(hv_series):
         return 0.0
     return round((cur - lo) / (hi - lo) * 100, 1)
 
+def calc_rsi(close_series, period=14):
+    s = close_series.dropna()
+    if len(s) < period + 1:
+        return None
+    delta = s.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    rs = gain / loss.replace(0, float("nan"))
+    rsi = 100 - (100 / (1 + rs))
+    val = rsi.iloc[-1]
+    return round(float(val), 1) if pd.notna(val) else None
+
 def get_iv30_and_oi(tk, price):
-    """ATM put IV from nearest 20-40 DTE expiry + total open interest + 25-delta put details."""
+    """Fetch IV30, OI, put/call ratio, and 25-delta put details from option chain."""
     try:
         today = date.today()
         total_oi = 0
+        total_call_vol, total_put_vol = 0, 0
         iv30, iv_dte = None, None
-        target_put = None  # (strike, bid, delta, dte, prem_yield)
-        for i, exp in enumerate(tk.options[:5]):
+        target_put = None  # (strike, bid, ask, delta, dte, prem_yield, spread_pct)
+        for exp in tk.options[:5]:
             dte = (datetime.strptime(exp, "%Y-%m-%d").date() - today).days
             if dte > 75:
                 break
             chain = tk.option_chain(exp)
-            total_oi += int(chain.calls["openInterest"].fillna(0).sum() + chain.puts["openInterest"].fillna(0).sum())
+            calls, puts_all = chain.calls, chain.puts
+            total_oi += int(calls["openInterest"].fillna(0).sum() + puts_all["openInterest"].fillna(0).sum())
+            total_call_vol += int(calls["volume"].fillna(0).sum())
+            total_put_vol  += int(puts_all["volume"].fillna(0).sum())
             if 20 <= dte <= 45:
-                puts = chain.puts[chain.puts["bid"] > 0].copy()
+                puts = puts_all[puts_all["bid"] > 0].copy()
                 if not puts.empty:
                     if iv30 is None:
-                        puts_atm = puts.copy()
-                        puts_atm["dist"] = abs(puts_atm["strike"] - price)
-                        atm = puts_atm.loc[puts_atm["dist"].idxmin()]
+                        atm_puts = puts.copy()
+                        atm_puts["dist"] = abs(atm_puts["strike"] - price)
+                        atm = atm_puts.loc[atm_puts["dist"].idxmin()]
                         iv30 = round(float(atm["impliedVolatility"]) * 100, 1)
                         iv_dte = int(dte)
-                    # Find 25-delta put: look for strike ~10-20% OTM with delta closest to -0.25
-                    if target_put is None and "delta" in puts.columns:
-                        puts["delta_dist"] = abs(puts["delta"].fillna(0) + 0.25)
-                        best = puts.loc[puts["delta_dist"].idxmin()]
+                    if target_put is None:
+                        if "delta" in puts.columns:
+                            puts["delta_dist"] = abs(puts["delta"].fillna(0) + 0.25)
+                            best = puts.loc[puts["delta_dist"].idxmin()]
+                        else:
+                            puts["dist"] = abs(puts["strike"] - price * 0.85)
+                            best = puts.loc[puts["dist"].idxmin()]
                         strike = round(float(best["strike"]), 2)
                         bid    = round(float(best["bid"]), 2)
-                        delta  = round(float(best["delta"]), 2) if pd.notna(best.get("delta")) else None
+                        ask    = round(float(best["ask"]), 2) if "ask" in best.index and pd.notna(best["ask"]) else None
+                        delta  = round(float(best["delta"]), 2) if "delta" in best.index and pd.notna(best["delta"]) else None
+                        mid    = (bid + ask) / 2 if ask else bid
+                        spread_pct = round((ask - bid) / mid * 100, 1) if ask and mid > 0 else None
                         prem_yield = round((bid / strike) * (365 / dte) * 100, 1) if bid > 0 and dte > 0 else None
-                        target_put = (strike, bid, delta, int(dte), prem_yield)
-                    elif target_put is None:
-                        # No delta column: use 15% OTM strike as proxy for ~25 delta
-                        target_strike = price * 0.85
-                        puts["dist"] = abs(puts["strike"] - target_strike)
-                        best = puts.loc[puts["dist"].idxmin()]
-                        strike = round(float(best["strike"]), 2)
-                        bid    = round(float(best["bid"]), 2)
-                        prem_yield = round((bid / strike) * (365 / dte) * 100, 1) if bid > 0 and dte > 0 else None
-                        target_put = (strike, bid, None, int(dte), prem_yield)
-        return iv30, iv_dte, total_oi if total_oi > 0 else None, target_put
+                        target_put = (strike, bid, delta, int(dte), prem_yield, spread_pct)
+        pc_ratio = round(total_put_vol / total_call_vol, 2) if total_call_vol > 0 else None
+        return iv30, iv_dte, total_oi if total_oi > 0 else None, target_put, pc_ratio
     except:
-        return None, None, None, None
+        return None, None, None, None, None
 
 def get_option_volume(tk):
     try:
@@ -271,27 +287,44 @@ def days_to_earnings(sym):
         return None
     return (datetime.strptime(EARNINGS[sym], "%Y-%m-%d").date() - date.today()).days
 
-def classify(ivr, iv30, hv20, hist_iv, dte_earn, above_ma, ret_30d,
-             p_min_ivr=50, p_earn_buf=7, p_min_gap=5, p_min_vs20d=0):
-    if dte_earn is not None:
-        if 0 < dte_earn <= p_earn_buf:
-            return f"📅 Earnings <{p_earn_buf}d", "🚫 AVOID", "red"
-        if -7 <= dte_earn <= 0:
-            return "💥 Post-earnings", "🔥 SELL NOW", "green"
-        if p_earn_buf < dte_earn <= p_earn_buf + 7:
-            return f"⚠️ Earnings {p_earn_buf}-{p_earn_buf+7}d", "⚠️ CAUTION", "yellow"
-    if above_ma is False and ret_30d is not None and ret_30d < -8:
-        return "📉 Trend fear", "❌ WAIT", "red"
-    gap_ok   = (iv30 and hv20 and (iv30 - hv20) >= p_min_gap)
-    vs20d_ok = (iv30 and hist_iv and (iv30 - hist_iv) >= p_min_vs20d) or hist_iv is None
-    ivr_ok   = ivr is not None and ivr >= p_min_ivr
-    if ivr_ok and above_ma and gap_ok and vs20d_ok:
-        return "✅ Clean VRP", "🟢 SELL PUTS", "green"
-    if ivr_ok and above_ma:
-        return "⚠️ Partial signal", "⏳ MONITOR", "yellow"
-    if ivr_ok:
-        return "⚠️ Mixed signals", "⏳ MONITOR", "yellow"
-    return "📉 Low IV", "⏳ MONITOR", "yellow"
+def classify(prem_yield, dte_earn, above_ma200, above_ma50, rsi, ret_30d,
+             iv30, hv20, hist_iv, p_earn_buf=7, p_min_yield=10):
+    """Yield-first signal logic."""
+    # Hard blocks
+    if dte_earn is not None and 0 < dte_earn <= p_earn_buf:
+        return f"📅 Earnings <{p_earn_buf}d", "🚫 AVOID", "red"
+    if rsi is not None and rsi < 25:
+        return "🆘 RSI Panic <25", "❌ WAIT", "red"
+    if ret_30d is not None and ret_30d < -35:
+        return "💥 Down >35% (30d)", "❌ WAIT", "red"
+    if not above_ma200 and ret_30d is not None and ret_30d < -15:
+        return "📉 Downtrend break", "❌ WAIT", "red"
+
+    # Post-earnings: IV still high, binary risk gone
+    if dte_earn is not None and -5 <= dte_earn <= 0:
+        return "💥 Post-earnings", "🔥 SELL NOW", "green"
+
+    # Yield gate
+    yield_ok = prem_yield is not None and prem_yield >= p_min_yield
+
+    # Bullish conditions
+    rsi_ok       = rsi is not None and 30 <= rsi <= 60
+    trend_ok     = above_ma50 or (above_ma200 and ret_30d is not None and ret_30d > -20)
+    fear_dip     = ret_30d is not None and -25 <= ret_30d <= -8
+    iv_spike     = iv30 and hv20 and (iv30 - hv20) >= 5
+    iv_above_avg = iv30 and hist_iv and (iv30 - hist_iv) >= 0
+
+    if yield_ok and trend_ok and rsi_ok and (iv_spike or iv_above_avg):
+        return "✅ Strong setup", "🟢 SELL PUTS", "green"
+    if yield_ok and fear_dip and rsi_ok:
+        return "😨 Fear dip", "🟢 SELL PUTS", "green"
+    if yield_ok and trend_ok:
+        return "⚠️ Partial setup", "⏳ MONITOR", "yellow"
+    if yield_ok:
+        return "💰 Yield OK/trend weak", "⏳ MONITOR", "yellow"
+    if dte_earn is not None and p_earn_buf < dte_earn <= p_earn_buf + 7:
+        return f"⚠️ Earnings {dte_earn}d", "⚠️ CAUTION", "yellow"
+    return "📉 Low yield", "⏳ MONITOR", "yellow"
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["📊 Vol Rankings", "📅 Earnings Calendar", "📰 News Feed"])
@@ -322,18 +355,26 @@ with tab1:
                 lr    = np.log(s / s.shift(1)).dropna()
                 hv_s  = lr.rolling(30).std() * np.sqrt(252) * 100
                 hv_ivr = calc_hv_ivr(hv_s)
-                ma20  = s.rolling(20).mean().iloc[-1]
-                above_ma = bool(s.iloc[-1] > ma20)
-                ret_30d  = round((s.iloc[-1] / s.iloc[-min(22, len(s))] - 1) * 100, 1)
-                price_1d_chg = round((s.iloc[-1] / s.iloc[-2] - 1) * 100, 2) if len(s) >= 2 else None
+                ma50  = s.rolling(50).mean().iloc[-1]
+                ma200 = s.rolling(200).mean().iloc[-1]
+                cur   = float(s.iloc[-1])
+                above_ma50  = bool(cur > float(ma50))  if pd.notna(ma50)  else None
+                above_ma200 = bool(cur > float(ma200)) if pd.notna(ma200) else None
+                vs_50ma_pct = round((cur / float(ma50)  - 1) * 100, 1) if pd.notna(ma50)  else None
+                ret_30d     = round((cur / float(s.iloc[-min(22, len(s))]) - 1) * 100, 1)
+                price_1d_chg = round((cur / float(s.iloc[-2]) - 1) * 100, 2) if len(s) >= 2 else None
+                rsi = calc_rsi(s)
                 hv_rows[sym] = {
-                    "price": round(float(s.iloc[-1]), 2),
-                    "price_chg": price_1d_chg,
-                    "hv20": hv20,
-                    "hv1y": hv1y,
-                    "hv_ivr": hv_ivr,
-                    "above_ma": above_ma,
-                    "ret_30d": ret_30d,
+                    "price":       round(cur, 2),
+                    "price_chg":   price_1d_chg,
+                    "hv20":        hv20,
+                    "hv1y":        hv1y,
+                    "hv_ivr":      hv_ivr,
+                    "above_ma50":  above_ma50,
+                    "above_ma200": above_ma200,
+                    "vs_50ma_pct": vs_50ma_pct,
+                    "ret_30d":     ret_30d,
+                    "rsi":         rsi,
                 }
             except:
                 continue
@@ -354,12 +395,12 @@ with tab1:
                     mktcap_b = round(mktcap / 1e9, 1) if mktcap else None
                 except:
                     mktcap_b = None
-                iv30, iv_dte, total_oi, target_put = get_iv30_and_oi(tk, d["price"])
-                put_strike = target_put[0] if target_put else None
-                put_bid    = target_put[1] if target_put else None
-                put_delta  = target_put[2] if target_put else None
+                iv30, iv_dte, total_oi, target_put, pc_ratio = get_iv30_and_oi(tk, d["price"])
+                put_strike     = target_put[0] if target_put else None
+                put_bid        = target_put[1] if target_put else None
+                put_delta      = target_put[2] if target_put else None
                 put_prem_yield = target_put[4] if target_put else None
-                opt_vol = get_option_volume(tk)
+                put_spread_pct = target_put[5] if target_put else None
 
                 # Record snapshot for building history
                 if iv30 is not None:
@@ -382,9 +423,10 @@ with tab1:
 
                 dte_earn = days_to_earnings(sym)
                 catalyst, action, sig_color = classify(
-                    ivr, iv30, d["hv20"], hist_iv_20d, dte_earn, d["above_ma"], d["ret_30d"],
-                    p_min_ivr=min_ivr, p_earn_buf=earn_buffer,
-                    p_min_gap=min_iv_hv_gap, p_min_vs20d=min_iv_vs_20d
+                    put_prem_yield, dte_earn,
+                    d["above_ma200"], d["above_ma50"], d["rsi"], d["ret_30d"],
+                    iv30, d["hv20"], hist_iv_20d,
+                    p_earn_buf=earn_buffer, p_min_yield=min_prem_yield
                 )
                 earn_str = EARNINGS.get(sym, "—")
                 rows.append({
@@ -392,27 +434,23 @@ with tab1:
                     "Mkt Cap $B":     mktcap_b,
                     "Price":          d["price"],
                     "1D %":           d["price_chg"],
+                    "RSI":            d["rsi"],
+                    "vs 50MA%":       d["vs_50ma_pct"],
+                    "30D Ret%":       d["ret_30d"],
                     "25D Strike":     put_strike,
                     "Put Bid":        put_bid,
                     "Delta":          put_delta,
                     "Prem Yield%":    put_prem_yield,
+                    "Spread%":        put_spread_pct,
+                    "P/C Ratio":      pc_ratio,
                     "IV30":           iv30,
-                    "20D Hist IV":    hist_iv_20d,
-                    "IV vs 20D":      round(iv30 - hist_iv_20d, 1) if iv30 and hist_iv_20d else None,
                     "20D HV":         d["hv20"],
-                    "1Y HV":          d["hv1y"],
-                    "IV Rank %":      round(ivr, 1) if ivr else None,
-                    "Rank Source":    iv_rank_source,
-                    "52wk IV Range":  iv_52wk_pos,
                     "IV−HV Gap":      round(iv30 - d["hv20"], 1) if iv30 and d["hv20"] else None,
-                    "OI Rank %":      round(oi_rank, 1) if oi_rank is not None else None,
-                    "Option Vol":     opt_vol,
-                    "Earnings":       earn_str if earn_str != "—" else None,
+                    "IV Rank %":      round(ivr, 1) if ivr else None,
                     "Days to Earn":   dte_earn,
                     "Catalyst":       catalyst,
                     "Action":         action,
                     "_sig_color":     sig_color,
-                    "30D Return":     d["ret_30d"],
                 })
                 time.sleep(0.2)
             except:
@@ -439,24 +477,24 @@ with tab1:
         elif show_filter == "🚫 Avoid (earnings soon)":
             df = df[df["Action"].str.contains("AVOID", na=False)]
 
-        # Apply threshold filters (guard against missing columns from old cache)
-        if min_ivr > 0 and "IV Rank %" in df.columns:
-            df = df[df["IV Rank %"].fillna(0) >= min_ivr]
-        if min_iv_hv_gap > 0 and "IV−HV Gap" in df.columns:
-            df = df[df["IV−HV Gap"].fillna(-99) >= min_iv_hv_gap]
-        if min_iv_vs_20d > 0 and "IV vs 20D" in df.columns:
-            df = df[df["IV vs 20D"].fillna(-99) >= min_iv_vs_20d]
-        if min_oi_rank > 0 and "OI Rank %" in df.columns:
-            df = df[df["OI Rank %"].fillna(0) >= min_oi_rank]
+        # Apply filters
         if min_prem_yield > 0 and "Prem Yield%" in df.columns:
             df = df[df["Prem Yield%"].fillna(0) >= min_prem_yield]
         if min_mktcap_b > 0 and "Mkt Cap $B" in df.columns:
             df = df[df["Mkt Cap $B"].fillna(0) >= min_mktcap_b]
+        if max_spread_pct < 50 and "Spread%" in df.columns:
+            df = df[df["Spread%"].fillna(999) <= max_spread_pct]
+        if min_rsi > 0 and "RSI" in df.columns:
+            df = df[df["RSI"].fillna(0) >= min_rsi]
+        if max_rsi < 100 and "RSI" in df.columns:
+            df = df[df["RSI"].fillna(100) <= max_rsi]
+        if max_ret_30d < 0 and "30D Ret%" in df.columns:
+            df = df[df["30D Ret%"].fillna(0) <= max_ret_30d]
 
         if df.empty:
             st.warning("No rows match current filters.")
         else:
-            sort_col = "IV Rank %" if "IV Rank %" in df.columns else df.columns[0]
+            sort_col = "Prem Yield%" if "Prem Yield%" in df.columns else df.columns[0]
             df = df.sort_values(sort_col, ascending=False).reset_index(drop=True)
 
             sells    = df["Action"].str.contains("SELL|🔥", na=False).sum()
@@ -492,11 +530,10 @@ with tab1:
 
             display_cols = [
                 "Symbol","Mkt Cap $B","Price","1D %",
-                "25D Strike","Put Bid","Delta","Prem Yield%",
-                "IV30","20D Hist IV","IV vs 20D",
-                "20D HV","IV Rank %","52wk IV Range",
-                "IV−HV Gap","OI Rank %","Days to Earn",
-                "Catalyst","Action"
+                "RSI","vs 50MA%","30D Ret%",
+                "25D Strike","Put Bid","Delta","Prem Yield%","Spread%",
+                "P/C Ratio","IV30","20D HV","IV−HV Gap","IV Rank %",
+                "Days to Earn","Catalyst","Action"
             ]
             df_show = df[[c for c in display_cols if c in df.columns]].copy()
             # Drop columns where ALL values are missing
@@ -552,35 +589,70 @@ with tab1:
                 if v >= 4:  return "color:#facc15"
                 return "color:#f87171"
 
+            def colour_rsi(val):
+                if pd.isna(val): return ""
+                v = float(val)
+                if v < 25:  return "background-color:#450a0a;color:#f87171;font-weight:bold"
+                if v <= 40: return "color:#4ade80;font-weight:bold"
+                if v <= 55: return "color:#86efac"
+                if v <= 70: return "color:#facc15"
+                return "color:#f87171"
+
+            def colour_ret(val):
+                if pd.isna(val): return ""
+                v = float(val)
+                if v <= -25: return "color:#f87171;font-weight:bold"
+                if v <= -10: return "color:#4ade80;font-weight:bold"
+                if v <= -5:  return "color:#86efac"
+                if v >= 0:   return "color:#9ca3af"
+                return "color:#facc15"
+
+            def colour_pc(val):
+                if pd.isna(val): return ""
+                v = float(val)
+                if v >= 1.5: return "color:#4ade80;font-weight:bold"
+                if v >= 1.0: return "color:#86efac"
+                if v >= 0.7: return "color:#facc15"
+                return "color:#f87171"
+
+            def colour_spread(val):
+                if pd.isna(val): return ""
+                v = float(val)
+                if v <= 5:  return "color:#4ade80"
+                if v <= 15: return "color:#facc15"
+                return "color:#f87171"
+
             fmt = {
-                "Mkt Cap $B":    lambda x: f"${x:.0f}B" if pd.notna(x) else "—",
-                "Price":         "${:.2f}",
-                "25D Strike":    "${:.2f}",
-                "Put Bid":       "${:.2f}",
-                "Delta":         lambda x: f"{x:.2f}" if pd.notna(x) else "—",
-                "Prem Yield%":   lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
-                "1D %":          "{:+.2f}%",
-                "IV30":          "{:.1f}%",
-                "20D Hist IV":   "{:.1f}%",
-                "IV vs 20D":     "{:+.1f}",
-                "20D HV":        "{:.1f}%",
-                "1Y HV":         "{:.1f}%",
-                "IV Rank %":     "{:.0f}%",
-                "IV−HV Gap":     "{:+.1f}",
-                "OI Rank %":     lambda x: f"{x:.0f}%" if pd.notna(x) else "—",
-                "Option Vol":    lambda x: f"{int(x):,}" if pd.notna(x) else "—",
-                "Days to Earn":  lambda x: f"{int(x)}d" if pd.notna(x) else "—",
+                "Mkt Cap $B":  lambda x: f"${x:.0f}B" if pd.notna(x) else "—",
+                "Price":       "${:.2f}",
+                "1D %":        "{:+.2f}%",
+                "RSI":         lambda x: f"{x:.0f}" if pd.notna(x) else "—",
+                "vs 50MA%":    lambda x: f"{x:+.1f}%" if pd.notna(x) else "—",
+                "30D Ret%":    lambda x: f"{x:+.1f}%" if pd.notna(x) else "—",
+                "25D Strike":  "${:.2f}",
+                "Put Bid":     "${:.2f}",
+                "Delta":       lambda x: f"{x:.2f}" if pd.notna(x) else "—",
+                "Prem Yield%": lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
+                "Spread%":     lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
+                "P/C Ratio":   lambda x: f"{x:.2f}" if pd.notna(x) else "—",
+                "IV30":        "{:.1f}%",
+                "20D HV":      "{:.1f}%",
+                "IV−HV Gap":   "{:+.1f}",
+                "IV Rank %":   lambda x: f"{x:.0f}%" if pd.notna(x) else "—",
+                "Days to Earn":lambda x: f"{int(x)}d" if pd.notna(x) else "—",
             }
 
             cols = set(df_show.columns)
             styled = df_show.style
-            if "IV Rank %"   in cols: styled = styled.map(colour_ivr,        subset=["IV Rank %"])
-            if "Action"      in cols: styled = styled.map(colour_action,     subset=["Action"])
-            if "IV−HV Gap"   in cols: styled = styled.map(colour_gap,        subset=["IV−HV Gap"])
-            if "IV vs 20D"   in cols: styled = styled.map(colour_vs20d,      subset=["IV vs 20D"])
-            if "OI Rank %"   in cols: styled = styled.map(colour_oi_rank,    subset=["OI Rank %"])
-            if "1D %"        in cols: styled = styled.map(colour_1d,         subset=["1D %"])
             if "Prem Yield%" in cols: styled = styled.map(colour_prem_yield, subset=["Prem Yield%"])
+            if "Action"      in cols: styled = styled.map(colour_action,     subset=["Action"])
+            if "RSI"         in cols: styled = styled.map(colour_rsi,        subset=["RSI"])
+            if "30D Ret%"    in cols: styled = styled.map(colour_ret,        subset=["30D Ret%"])
+            if "P/C Ratio"   in cols: styled = styled.map(colour_pc,         subset=["P/C Ratio"])
+            if "Spread%"     in cols: styled = styled.map(colour_spread,     subset=["Spread%"])
+            if "IV−HV Gap"   in cols: styled = styled.map(colour_gap,        subset=["IV−HV Gap"])
+            if "IV Rank %"   in cols: styled = styled.map(colour_ivr,        subset=["IV Rank %"])
+            if "1D %"        in cols: styled = styled.map(colour_1d,         subset=["1D %"])
             fmt_filtered = {k: v for k, v in fmt.items() if k in cols}
             styled = styled.format(fmt_filtered, na_rep="—")
             st.dataframe(styled, use_container_width=True, height=620, hide_index=True)
