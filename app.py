@@ -17,40 +17,27 @@ st.markdown("""
 <style>
 [data-testid="stAppViewContainer"] { background: #0e1117; }
 div[data-testid="metric-container"] { background:#1a1d27; border-radius:8px; padding:10px; }
-.rank-high { color:#4ade80; font-weight:bold; }
-.rank-med  { color:#facc15; }
-.rank-low  { color:#f87171; }
 thead tr th { background:#1a1d27 !important; color:#e2e8f0 !important; position:sticky; top:0; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("📊 Volatility Rankings")
-st.caption("IV30 Rank · Historical Vol · Option Volume — same data as Market Chameleon, built on Yahoo Finance")
+st.caption("IV30 · IV Rank · 20D Hist IV · 52wk Position · OI Rank — Market Chameleon style, built on Yahoo Finance")
 
 # ── Universe ────────────────────────────────────────────────────────────────
 UNIVERSE = [
-    # Mega-cap tech
     "AAPL","MSFT","NVDA","GOOGL","META","AMZN","TSLA","AVGO","AMD","INTC",
-    # Growth / momentum
     "COIN","MSTR","PLTR","ARM","SMCI","MU","AFRM","SOFI","HOOD","DKNG",
-    # Crypto proxies
     "MARA","RIOT","CLSK","HUT",
-    # Retail / consumer
-    "NFLX","AMZN","PYPL","UBER","SNAP","RBLX",
-    # Biotech / pharma
+    "NFLX","PYPL","UBER","SNAP","RBLX",
     "LLY","PFE","ABBV","MRNA","BNTX",
-    # Financials
     "JPM","GS","BAC","MS",
-    # Energy
     "XOM","CVX","XLE",
-    # China
     "BABA","JD","NIO",
-    # EV
     "RIVN","LCID",
-    # ETFs
     "SPY","QQQ","IWM","GLD","SLV","ARKK","SOXL","TQQQ",
 ]
-UNIVERSE = list(dict.fromkeys(UNIVERSE))  # dedup
+UNIVERSE = list(dict.fromkeys(UNIVERSE))
 
 EARNINGS = {
     "TSLA":"2026-07-23","AMD":"2026-07-29","NVDA":"2026-08-27",
@@ -67,6 +54,7 @@ EARNINGS = {
 
 CACHE_FILE = os.path.join(os.path.dirname(__file__), "intel_cache.json")
 CACHE_TTL  = 4 * 3600  # 4 hours
+IV_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "iv_history.json")
 
 def load_cache():
     try:
@@ -87,20 +75,99 @@ def save_cache(data):
 def cache_ok(cache, key):
     return key in cache and (time.time() - cache.get(key, {}).get("_ts", 0)) < CACHE_TTL
 
+def load_iv_history():
+    try:
+        if os.path.exists(IV_HISTORY_FILE):
+            with open(IV_HISTORY_FILE) as f:
+                return json.load(f)
+    except:
+        pass
+    return {}
+
+def save_iv_history(data):
+    try:
+        with open(IV_HISTORY_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except:
+        pass
+
+def record_iv_snapshot(sym, iv30, oi):
+    """Store daily IV30 + OI snapshot for building rank history."""
+    hist = load_iv_history()
+    today_str = date.today().isoformat()
+    if sym not in hist:
+        hist[sym] = []
+    # Remove duplicate for today
+    hist[sym] = [e for e in hist[sym] if e["date"] != today_str]
+    hist[sym].append({"date": today_str, "iv30": iv30, "oi": oi})
+    # Keep only last 252 trading days (~1 year)
+    hist[sym] = sorted(hist[sym], key=lambda x: x["date"])[-260:]
+    save_iv_history(hist)
+    return hist
+
+def calc_iv_rank(sym, current_iv30, hist):
+    """IV Rank % from actual IV30 history (52-week range)."""
+    entries = hist.get(sym, [])
+    # Filter last 252 calendar days
+    cutoff = (date.today() - timedelta(days=365)).isoformat()
+    vals = [e["iv30"] for e in entries if e["date"] >= cutoff and e["iv30"] is not None]
+    if len(vals) < 5:
+        return None, None, None  # not enough history
+    lo, hi = min(vals), max(vals)
+    if hi == lo:
+        return 0.0, lo, hi
+    rank = round((current_iv30 - lo) / (hi - lo) * 100, 1)
+    return rank, round(lo, 1), round(hi, 1)
+
+def calc_20d_hist_iv(sym, hist):
+    """Average IV30 over past 20 trading days."""
+    entries = hist.get(sym, [])
+    recent = sorted(entries, key=lambda x: x["date"])[-20:]
+    vals = [e["iv30"] for e in recent if e["iv30"] is not None]
+    if len(vals) < 3:
+        return None
+    return round(sum(vals) / len(vals), 1)
+
+def calc_oi_rank(sym, current_oi, hist):
+    """OI Rank % from OI history (52-week range)."""
+    entries = hist.get(sym, [])
+    cutoff = (date.today() - timedelta(days=365)).isoformat()
+    vals = [e["oi"] for e in entries if e["date"] >= cutoff and e.get("oi") is not None]
+    if len(vals) < 5:
+        return None
+    lo, hi = min(vals), max(vals)
+    if hi == lo:
+        return 0.0
+    return round((current_oi - lo) / (hi - lo) * 100, 1)
+
 cache = load_cache()
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Filters")
-    min_ivr     = st.slider("Min IV Rank %", 0, 100, 0)
     show_filter = st.selectbox("Show", ["All", "✅ Sell signals only", "🚫 Avoid (earnings soon)"])
     custom_add  = st.text_input("Add tickers (comma-sep)", "")
     run_btn     = st.button("🔄 Refresh Rankings", use_container_width=True)
+
+    st.divider()
+    st.subheader("📐 Signal Thresholds")
+    st.caption("Tune what counts as a SELL PUTS signal")
+    min_ivr         = st.slider("Min IV Rank %",        0, 100, 50,  help="IV must be in top X% of its 52-week range")
+    min_iv_hv_gap   = st.slider("Min IV−HV Gap (pts)",  0, 30,  5,   help="IV30 must exceed 20D HV by at least this many vol points")
+    min_iv_vs_20d   = st.slider("Min IV vs 20D Hist IV",  -20, 20, 0, help="IV30 vs its own 20-day average — positive = currently elevated")
+    min_oi_rank     = st.slider("Min OI Rank %",         0, 100, 0,  help="Minimum open interest rank for liquidity (0 = no filter)")
+    earn_buffer     = st.slider("Earnings buffer (days)", 0, 21, 7,  help="Avoid tickers with earnings within this many days")
+
     st.divider()
     if cache_ok(cache, "rankings"):
         age = int((time.time() - cache["rankings"]["_ts"]) / 60)
         st.caption(f"Cache: {age} min old")
+    iv_hist = load_iv_history()
+    tracked = sum(1 for sym in UNIVERSE if len(iv_hist.get(sym, [])) > 0)
     st.caption(f"Universe: {len(UNIVERSE)} tickers")
+    st.caption(f"IV history: {tracked} tickers tracked")
+    if tracked < len(UNIVERSE):
+        st.info(f"Building IV history — ranks improve after {len(UNIVERSE) - tracked} more daily scans.")
 
 universe = UNIVERSE.copy()
 if custom_add:
@@ -109,14 +176,13 @@ universe = list(dict.fromkeys(universe))
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def calc_hv(close_series, days):
-    """Annualised historical volatility over N trading days."""
     if len(close_series) < days + 2:
         return None
     lr = np.log(close_series / close_series.shift(1)).dropna()
     return round(float(lr.tail(days).std() * np.sqrt(252) * 100), 1)
 
-def calc_ivr(hv_series):
-    """IVR from rolling 30-day HV series (52-week range)."""
+def calc_hv_ivr(hv_series):
+    """Fallback IVR from rolling HV (used until real IV history builds up)."""
     s = hv_series.dropna()
     if s.empty:
         return None
@@ -125,27 +191,30 @@ def calc_ivr(hv_series):
         return 0.0
     return round((cur - lo) / (hi - lo) * 100, 1)
 
-def get_iv30(tk, price):
-    """ATM put IV from nearest expiry 20-40 DTE as proxy for IV30."""
+def get_iv30_and_oi(tk, price):
+    """ATM put IV from nearest 20-40 DTE expiry + total open interest."""
     try:
         today = date.today()
-        for exp in tk.options:
+        total_oi = 0
+        iv30, iv_dte = None, None
+        for i, exp in enumerate(tk.options[:5]):
             dte = (datetime.strptime(exp, "%Y-%m-%d").date() - today).days
-            if 20 <= dte <= 40:
-                puts = tk.option_chain(exp).puts
-                puts = puts[puts["bid"] > 0]
-                if puts.empty:
-                    continue
-                puts = puts.copy()
-                puts["dist"] = abs(puts["strike"] - price)
-                atm = puts.loc[puts["dist"].idxmin()]
-                return round(float(atm["impliedVolatility"]) * 100, 1), int(dte)
-        return None, None
+            if dte > 75:
+                break
+            chain = tk.option_chain(exp)
+            total_oi += int(chain.calls["openInterest"].fillna(0).sum() + chain.puts["openInterest"].fillna(0).sum())
+            if iv30 is None and 20 <= dte <= 45:
+                puts = chain.puts[chain.puts["bid"] > 0].copy()
+                if not puts.empty:
+                    puts["dist"] = abs(puts["strike"] - price)
+                    atm = puts.loc[puts["dist"].idxmin()]
+                    iv30 = round(float(atm["impliedVolatility"]) * 100, 1)
+                    iv_dte = int(dte)
+        return iv30, iv_dte, total_oi if total_oi > 0 else None
     except:
-        return None, None
+        return None, None, None
 
 def get_option_volume(tk):
-    """Total option volume across all near-term expiries."""
     try:
         today = date.today()
         total_vol = 0
@@ -164,20 +233,25 @@ def days_to_earnings(sym):
         return None
     return (datetime.strptime(EARNINGS[sym], "%Y-%m-%d").date() - date.today()).days
 
-def classify(ivr, iv30, hv20, dte_earn, above_ma, ret_30d):
-    """Return (catalyst, action, signal_color)."""
+def classify(ivr, iv30, hv20, hist_iv, dte_earn, above_ma, ret_30d,
+             p_min_ivr=50, p_earn_buf=7, p_min_gap=5, p_min_vs20d=0):
     if dte_earn is not None:
-        if 0 < dte_earn <= 7:
-            return "📅 Earnings <7d", "🚫 AVOID", "red"
+        if 0 < dte_earn <= p_earn_buf:
+            return f"📅 Earnings <{p_earn_buf}d", "🚫 AVOID", "red"
         if -7 <= dte_earn <= 0:
             return "💥 Post-earnings", "🔥 SELL NOW", "green"
-        if 7 < dte_earn <= 14:
-            return "⚠️ Earnings 7-14d", "⚠️ CAUTION", "yellow"
+        if p_earn_buf < dte_earn <= p_earn_buf + 7:
+            return f"⚠️ Earnings {p_earn_buf}-{p_earn_buf+7}d", "⚠️ CAUTION", "yellow"
     if above_ma is False and ret_30d is not None and ret_30d < -8:
         return "📉 Trend fear", "❌ WAIT", "red"
-    if ivr is not None and ivr >= 50 and above_ma:
+    gap_ok   = (iv30 and hv20 and (iv30 - hv20) >= p_min_gap)
+    vs20d_ok = (iv30 and hist_iv and (iv30 - hist_iv) >= p_min_vs20d) or hist_iv is None
+    ivr_ok   = ivr is not None and ivr >= p_min_ivr
+    if ivr_ok and above_ma and gap_ok and vs20d_ok:
         return "✅ Clean VRP", "🟢 SELL PUTS", "green"
-    if ivr is not None and ivr >= 50:
+    if ivr_ok and above_ma:
+        return "⚠️ Partial signal", "⏳ MONITOR", "yellow"
+    if ivr_ok:
         return "⚠️ Mixed signals", "⏳ MONITOR", "yellow"
     return "📉 Low IV", "⏳ MONITOR", "yellow"
 
@@ -186,20 +260,17 @@ tab1, tab2, tab3 = st.tabs(["📊 Vol Rankings", "📅 Earnings Calendar", "📰
 
 # ════════════════════════════════════════════════════════════════════════════
 with tab1:
-    # ── Run or load cache ──
     if run_btn:
         rows = []
         prog = st.progress(0, "Loading price history…")
         status_txt = st.empty()
 
-        # Step 1: Bulk download 1y price history
         raw = yf.download(universe, period="1y", auto_adjust=True, progress=False)
         if isinstance(raw.columns, pd.MultiIndex):
             closes = raw["Close"]
         else:
             closes = raw[["Close"]] if "Close" in raw.columns else raw
 
-        # Step 2: Compute HV metrics from price history (no API calls)
         hv_rows = {}
         for sym in universe:
             try:
@@ -212,7 +283,7 @@ with tab1:
                 hv1y  = calc_hv(s, 252)
                 lr    = np.log(s / s.shift(1)).dropna()
                 hv_s  = lr.rolling(30).std() * np.sqrt(252) * 100
-                ivr   = calc_ivr(hv_s)
+                hv_ivr = calc_hv_ivr(hv_s)
                 ma20  = s.rolling(20).mean().iloc[-1]
                 above_ma = bool(s.iloc[-1] > ma20)
                 ret_30d  = round((s.iloc[-1] / s.iloc[-min(22, len(s))] - 1) * 100, 1)
@@ -222,46 +293,73 @@ with tab1:
                     "price_chg": price_1d_chg,
                     "hv20": hv20,
                     "hv1y": hv1y,
-                    "ivr": ivr,
+                    "hv_ivr": hv_ivr,
                     "above_ma": above_ma,
                     "ret_30d": ret_30d,
                 }
             except:
                 continue
 
-        # Step 3: Filter by IVR, then fetch IV30 + option volume only for qualifying tickers
-        qualifying = [s for s, v in hv_rows.items() if v.get("ivr") is not None and v["ivr"] >= min_ivr]
-        status_txt.text(f"{len(qualifying)} tickers passed IVR≥{min_ivr}% — fetching live IV…")
+        qualifying = [s for s, v in hv_rows.items() if v.get("hv_ivr") is not None and v["hv_ivr"] >= min_ivr]
+        status_txt.text(f"{len(qualifying)} tickers passed filter — fetching live IV + OI…")
+
+        iv_hist = load_iv_history()
 
         for i, sym in enumerate(qualifying):
             prog.progress((i + 1) / max(len(qualifying), 1), f"IV fetch: {sym}")
             try:
                 d = hv_rows[sym]
                 tk = yf.Ticker(sym)
-                iv30, iv_dte = get_iv30(tk, d["price"])
+                iv30, iv_dte, total_oi = get_iv30_and_oi(tk, d["price"])
                 opt_vol = get_option_volume(tk)
+
+                # Record snapshot for building history
+                if iv30 is not None:
+                    iv_hist = record_iv_snapshot(sym, iv30, total_oi)
+
+                # Compute IV-based rank (uses real IV history)
+                iv_rank, iv_52wk_lo, iv_52wk_hi = calc_iv_rank(sym, iv30, iv_hist) if iv30 else (None, None, None)
+                # Fall back to HV-based rank if not enough IV history
+                ivr = iv_rank if iv_rank is not None else d["hv_ivr"]
+                iv_rank_source = "IV" if iv_rank is not None else "HV~"
+
+                hist_iv_20d = calc_20d_hist_iv(sym, iv_hist)
+                oi_rank = calc_oi_rank(sym, total_oi, iv_hist) if total_oi else None
+
+                # 52wk position string
+                if iv_52wk_lo is not None and iv_52wk_hi is not None:
+                    iv_52wk_pos = f"{iv_52wk_lo:.0f}% – {iv_52wk_hi:.0f}%"
+                else:
+                    iv_52wk_pos = None
+
                 dte_earn = days_to_earnings(sym)
                 catalyst, action, sig_color = classify(
-                    d["ivr"], iv30, d["hv20"], dte_earn, d["above_ma"], d["ret_30d"]
+                    ivr, iv30, d["hv20"], hist_iv_20d, dte_earn, d["above_ma"], d["ret_30d"],
+                    p_min_ivr=min_ivr, p_earn_buf=earn_buffer,
+                    p_min_gap=min_iv_hv_gap, p_min_vs20d=min_iv_vs_20d
                 )
                 earn_str = EARNINGS.get(sym, "—")
                 rows.append({
-                    "Symbol":       sym,
-                    "Price":        d["price"],
-                    "1D %":         d["price_chg"],
-                    "IV30":         iv30,
-                    "IV DTE":       iv_dte,
-                    "20D HV":       d["hv20"],
-                    "1Y HV":        d["hv1y"],
-                    "IV Rank %":    d["ivr"],
-                    "IV−HV Gap":    round(iv30 - d["hv20"], 1) if iv30 and d["hv20"] else None,
-                    "Option Vol":   opt_vol,
-                    "Earnings":     earn_str if earn_str != "—" else None,
-                    "Days to Earn": dte_earn,
-                    "Catalyst":     catalyst,
-                    "Action":       action,
-                    "_sig_color":   sig_color,
-                    "30D Return":   d["ret_30d"],
+                    "Symbol":         sym,
+                    "Price":          d["price"],
+                    "1D %":           d["price_chg"],
+                    "IV30":           iv30,
+                    "20D Hist IV":    hist_iv_20d,
+                    "IV vs 20D":      round(iv30 - hist_iv_20d, 1) if iv30 and hist_iv_20d else None,
+                    "20D HV":         d["hv20"],
+                    "1Y HV":          d["hv1y"],
+                    "IV Rank %":      round(ivr, 1) if ivr else None,
+                    "Rank Source":    iv_rank_source,
+                    "52wk IV Range":  iv_52wk_pos,
+                    "IV−HV Gap":      round(iv30 - d["hv20"], 1) if iv30 and d["hv20"] else None,
+                    "OI Rank %":      round(oi_rank, 1) if oi_rank is not None else None,
+                    "Option Vol":     opt_vol,
+                    "Earnings":       earn_str if earn_str != "—" else None,
+                    "Days to Earn":   dte_earn,
+                    "Catalyst":       catalyst,
+                    "Action":         action,
+                    "_sig_color":     sig_color,
+                    "30D Return":     d["ret_30d"],
                 })
                 time.sleep(0.2)
             except:
@@ -280,7 +378,6 @@ with tab1:
         rows = []
         st.info("👈 Click **Refresh Rankings** to load the volatility table.")
 
-    # ── Apply filters ──
     if rows:
         df = pd.DataFrame(rows)
 
@@ -289,15 +386,24 @@ with tab1:
         elif show_filter == "🚫 Avoid (earnings soon)":
             df = df[df["Action"].str.contains("AVOID", na=False)]
 
+        # Apply threshold filters
+        if min_ivr > 0:
+            df = df[df["IV Rank %"].fillna(0) >= min_ivr]
+        if min_iv_hv_gap > 0:
+            df = df[df["IV−HV Gap"].fillna(-99) >= min_iv_hv_gap]
+        if min_iv_vs_20d > 0:
+            df = df[df["IV vs 20D"].fillna(-99) >= min_iv_vs_20d]
+        if min_oi_rank > 0:
+            df = df[df["OI Rank %"].fillna(0) >= min_oi_rank]
+
         if df.empty:
             st.warning("No rows match current filters.")
         else:
             df = df.sort_values("IV Rank %", ascending=False).reset_index(drop=True)
 
-            # ── Summary metrics ──
-            sells   = df["Action"].str.contains("SELL|🔥", na=False).sum()
-            avoids  = df["Action"].str.contains("AVOID|WAIT", na=False).sum()
-            monitors= df["Action"].str.contains("MONITOR|CAUTION", na=False).sum()
+            sells    = df["Action"].str.contains("SELL|🔥", na=False).sum()
+            avoids   = df["Action"].str.contains("AVOID|WAIT", na=False).sum()
+            monitors = df["Action"].str.contains("MONITOR|CAUTION", na=False).sum()
 
             c1,c2,c3,c4 = st.columns(4)
             c1.metric("🟢 Sell signals", int(sells))
@@ -306,10 +412,26 @@ with tab1:
             c4.metric("Tickers shown", len(df))
             st.divider()
 
-            # ── Display table (mimicking Market Chameleon layout) ──
+            # Column guide
+            with st.expander("📖 Column guide", expanded=False):
+                st.markdown("""
+| Column | What it means |
+|---|---|
+| **IV30** | Current implied vol for ~30-day options — your premium income rate |
+| **20D Hist IV** | Average IV30 over past 20 days — is today's IV elevated vs recent? |
+| **IV vs 20D** | IV30 minus 20D Hist IV — positive = IV spiked above recent norm |
+| **20D HV** | Actual realised vol over past 20 days — what the stock actually moved |
+| **IV Rank %** | Where IV30 sits in its 52-week range (0%=cheapest, 100%=most expensive) |
+| **52wk IV Range** | The low–high IV30 range over the past year (context for the rank) |
+| **IV−HV Gap** | IV30 minus 20D HV — the premium you're collecting above realised vol |
+| **OI Rank %** | Where open interest sits in its 52-week range — higher = more liquid |
+| **Rank Source** | IV = from real IV history · HV~ = HV proxy (builds after daily scans) |
+""")
+
             display_cols = [
-                "Symbol","Price","1D %","IV30","20D HV","1Y HV",
-                "IV Rank %","IV−HV Gap","Option Vol","Earnings","Days to Earn",
+                "Symbol","Price","1D %","IV30","20D Hist IV","IV vs 20D",
+                "20D HV","1Y HV","IV Rank %","52wk IV Range",
+                "IV−HV Gap","OI Rank %","Option Vol","Earnings","Days to Earn",
                 "Catalyst","Action"
             ]
             df_show = df[[c for c in display_cols if c in df.columns]].copy()
@@ -338,47 +460,70 @@ with tab1:
                 if v >= 0:  return "color:#facc15"
                 return "color:#f87171"
 
+            def colour_vs20d(val):
+                if pd.isna(val): return ""
+                v = float(val)
+                if v >= 5:  return "color:#4ade80;font-weight:bold"
+                if v >= 0:  return "color:#facc15"
+                return "color:#f87171"
+
+            def colour_oi_rank(val):
+                if pd.isna(val): return ""
+                v = float(val)
+                if v >= 70: return "color:#4ade80;font-weight:bold"
+                if v >= 40: return "color:#facc15"
+                return "color:#f87171"
+
             def colour_1d(val):
                 if pd.isna(val): return ""
                 return "color:#4ade80" if float(val) >= 0 else "color:#f87171"
+
+            fmt = {
+                "Price":         "${:.2f}",
+                "1D %":          "{:+.2f}%",
+                "IV30":          "{:.1f}%",
+                "20D Hist IV":   "{:.1f}%",
+                "IV vs 20D":     "{:+.1f}",
+                "20D HV":        "{:.1f}%",
+                "1Y HV":         "{:.1f}%",
+                "IV Rank %":     "{:.0f}%",
+                "IV−HV Gap":     "{:+.1f}",
+                "OI Rank %":     lambda x: f"{x:.0f}%" if pd.notna(x) else "—",
+                "Option Vol":    lambda x: f"{int(x):,}" if pd.notna(x) else "—",
+                "Days to Earn":  lambda x: f"{int(x)}d" if pd.notna(x) else "—",
+            }
+
+            subset_cols = [c for c in ["IV vs 20D","IV−HV Gap","OI Rank %","1D %","IV Rank %","Action"] if c in df_show.columns]
 
             styled = (
                 df_show.style
                 .map(colour_ivr,    subset=["IV Rank %"])
                 .map(colour_action, subset=["Action"])
                 .map(colour_gap,    subset=["IV−HV Gap"])
+                .map(colour_vs20d,  subset=["IV vs 20D"])
+                .map(colour_oi_rank,subset=["OI Rank %"])
                 .map(colour_1d,     subset=["1D %"])
-                .format({
-                    "Price":       "${:.2f}",
-                    "1D %":        "{:+.2f}%",
-                    "IV30":        "{:.1f}%",
-                    "20D HV":      "{:.1f}%",
-                    "1Y HV":       "{:.1f}%",
-                    "IV Rank %":   "{:.0f}%",
-                    "IV−HV Gap":   "{:+.1f}",
-                    "Option Vol":  lambda x: f"{int(x):,}" if pd.notna(x) else "—",
-                    "Days to Earn":lambda x: f"{int(x)}d" if pd.notna(x) else "—",
-                }, na_rep="—")
+                .format(fmt, na_rep="—")
             )
-            st.dataframe(styled, use_container_width=True, height=600, hide_index=True)
+            st.dataframe(styled, use_container_width=True, height=620, hide_index=True)
 
-            # ── Download ──
             csv = df_show.to_csv(index=False)
             st.download_button("⬇ Download CSV", csv, "vol_rankings.csv", "text/csv")
 
             st.divider()
 
-            # ── Top sell setups detail ──
             sell_df = df[df["Action"].str.contains("SELL|🔥", na=False)].head(8)
             if not sell_df.empty:
                 st.subheader("🎯 Top Put-Selling Setups")
                 for _, r in sell_df.iterrows():
                     earn_note = f" | Earnings: {r['Earnings']} ({r['Days to Earn']}d)" if pd.notna(r.get('Earnings')) else ""
                     iv_gap = f" | IV−HV Gap: +{r['IV−HV Gap']:.1f}pts" if pd.notna(r.get('IV−HV Gap')) else ""
+                    hist_note = f" | vs 20D IV: {r['IV vs 20D']:+.1f}" if pd.notna(r.get('IV vs 20D')) else ""
+                    oi_note = f" | OI Rank: {r['OI Rank %']:.0f}%" if pd.notna(r.get('OI Rank %')) else ""
                     st.success(
                         f"**{r['Symbol']}** ${r['Price']:.2f} · "
-                        f"IV30: {r['IV30']:.0f}% · 20D HV: {r['20D HV']:.0f}% · "
-                        f"IV Rank: {r['IV Rank %']:.0f}%{iv_gap} · "
+                        f"IV30: {r['IV30']:.0f}% · IV Rank: {r['IV Rank %']:.0f}%"
+                        f"{hist_note}{iv_gap}{oi_note} · "
                         f"{r['Catalyst']}{earn_note}"
                     )
 
@@ -415,12 +560,10 @@ with tab2:
             return ""
 
         st.dataframe(
-            df_e.style.map(sty_status, subset=["Status"])
-                      .format({"Days Away": "{}d"}),
+            df_e.style.map(sty_status, subset=["Status"]).format({"Days Away": "{}d"}),
             use_container_width=True, height=520, hide_index=True
         )
 
-        # Timeline chart
         st.divider()
         st.subheader("Earnings Timeline")
         cmap = {
@@ -446,8 +589,7 @@ with tab2:
                           xaxis=dict(range=[-10,65]),
                           margin=dict(l=80,r=40,t=20,b=40))
         st.plotly_chart(fig, use_container_width=True)
-
-        st.info("**Rule:** Never sell puts within 7 days BEFORE earnings. Best window: 1-3 days AFTER earnings — binary risk gone, IV still elevated.")
+        st.info("**Rule:** Never sell puts within 7 days BEFORE earnings. Best window: 1-3 days AFTER — binary risk gone, IV still elevated.")
 
 # ════════════════════════════════════════════════════════════════════════════
 with tab3:
@@ -472,8 +614,7 @@ with tab3:
                     items = []
                     for n in raw_news[:8]:
                         t = n.get("title","")
-                        if not t:
-                            continue
+                        if not t: continue
                         tl = t.lower()
                         pos = sum(1 for w in pos_w if w in tl)
                         neg = sum(1 for w in neg_w if w in tl)
@@ -492,19 +633,16 @@ with tab3:
             pos = sum(1 for i in items if "Positive" in i["sentiment"])
             neg = sum(1 for i in items if "Negative" in i["sentiment"])
             neu = sum(1 for i in items if "Neutral"  in i["sentiment"])
-
             c1,c2,c3 = st.columns(3)
             c1.metric("🟢 Positive", pos)
             c2.metric("🔴 Negative", neg)
             c3.metric("⚪ Neutral",  neu)
-
             if neg > pos:
-                st.warning(f"⚠️  Mostly negative news for **{news_sym}** — IV likely driven by fear/uncertainty. Higher risk to sell puts.")
+                st.warning(f"⚠️ Mostly negative news for **{news_sym}** — IV likely fear-driven. Higher risk to sell puts.")
             elif pos > neg:
                 st.success(f"✅ Mostly positive news for **{news_sym}** — IV elevated but not fear-driven. Cleaner premium opportunity.")
             else:
                 st.info(f"Mixed/neutral news for **{news_sym}** — check earnings calendar for primary IV catalyst.")
-
             st.divider()
             for item in items:
                 color = {"🟢 Positive":"#4ade80","🔴 Negative":"#f87171","⚪ Neutral":"#9ca3af"}.get(item["sentiment"],"#9ca3af")
@@ -520,9 +658,11 @@ with tab3:
 
     st.divider()
     st.markdown("""
-**Decision framework:**
-1. Check **Vol Rankings** → find stocks with IV Rank ≥ 50% + Action = 🟢 SELL PUTS
-2. Check **Earnings Calendar** → confirm no earnings within 7 days of your put expiry
-3. Check **News Feed** → if mostly negative, understand it's fear-driven IV (riskier)
-4. Only enter if: Clean VRP or Post-earnings + neutral/positive news + trend intact
+**Decision checklist:**
+1. **IV Rank % > 60%** — IV historically expensive (sell into elevated vol)
+2. **IV vs 20D > 0** — IV spiked above recent norm (don't sell into a quiet market)
+3. **IV−HV Gap > +5** — collecting premium above what stock actually moves
+4. **OI Rank % > 40%** — enough liquidity, tight spreads
+5. **No earnings within 7 days** of your put expiry
+6. **Action = 🟢 SELL PUTS** — all conditions aligned
 """)
