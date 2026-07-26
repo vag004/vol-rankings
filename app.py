@@ -416,22 +416,23 @@ with tab1:
         elif show_filter == "🚫 Avoid (earnings soon)":
             df = df[df["Action"].str.contains("AVOID", na=False)]
 
-        # Apply threshold filters
-        if min_ivr > 0:
+        # Apply threshold filters (guard against missing columns from old cache)
+        if min_ivr > 0 and "IV Rank %" in df.columns:
             df = df[df["IV Rank %"].fillna(0) >= min_ivr]
-        if min_iv_hv_gap > 0:
+        if min_iv_hv_gap > 0 and "IV−HV Gap" in df.columns:
             df = df[df["IV−HV Gap"].fillna(-99) >= min_iv_hv_gap]
-        if min_iv_vs_20d > 0:
+        if min_iv_vs_20d > 0 and "IV vs 20D" in df.columns:
             df = df[df["IV vs 20D"].fillna(-99) >= min_iv_vs_20d]
-        if min_oi_rank > 0:
+        if min_oi_rank > 0 and "OI Rank %" in df.columns:
             df = df[df["OI Rank %"].fillna(0) >= min_oi_rank]
-        if min_prem_yield > 0:
+        if min_prem_yield > 0 and "Prem Yield%" in df.columns:
             df = df[df["Prem Yield%"].fillna(0) >= min_prem_yield]
 
         if df.empty:
             st.warning("No rows match current filters.")
         else:
-            df = df.sort_values("IV Rank %", ascending=False).reset_index(drop=True)
+            sort_col = "IV Rank %" if "IV Rank %" in df.columns else df.columns[0]
+            df = df.sort_values(sort_col, ascending=False).reset_index(drop=True)
 
             sells    = df["Action"].str.contains("SELL|🔥", na=False).sum()
             avoids   = df["Action"].str.contains("AVOID|WAIT", na=False).sum()
@@ -473,9 +474,8 @@ with tab1:
                 "Catalyst","Action"
             ]
             df_show = df[[c for c in display_cols if c in df.columns]].copy()
-            # Drop columns where more than 80% of values are missing
-            thresh = int(len(df_show) * 0.2)
-            df_show = df_show.dropna(axis=1, thresh=max(thresh, 1))
+            # Drop columns where ALL values are missing
+            df_show = df_show.loc[:, df_show.notna().any()]
 
             def colour_ivr(val):
                 if pd.isna(val): return ""
@@ -545,8 +545,6 @@ with tab1:
                 "Option Vol":    lambda x: f"{int(x):,}" if pd.notna(x) else "—",
                 "Days to Earn":  lambda x: f"{int(x)}d" if pd.notna(x) else "—",
             }
-
-            subset_cols = [c for c in ["IV vs 20D","IV−HV Gap","OI Rank %","1D %","IV Rank %","Action"] if c in df_show.columns]
 
             cols = set(df_show.columns)
             styled = df_show.style
