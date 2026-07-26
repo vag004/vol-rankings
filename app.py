@@ -548,18 +548,17 @@ with tab1:
 
             subset_cols = [c for c in ["IV vs 20D","IV−HV Gap","OI Rank %","1D %","IV Rank %","Action"] if c in df_show.columns]
 
-            prem_yield_cols = [c for c in ["Prem Yield%"] if c in df_show.columns]
-            styled = (
-                df_show.style
-                .map(colour_ivr,        subset=["IV Rank %"])
-                .map(colour_action,     subset=["Action"])
-                .map(colour_gap,        subset=["IV−HV Gap"])
-                .map(colour_vs20d,      subset=["IV vs 20D"])
-                .map(colour_oi_rank,    subset=["OI Rank %"])
-                .map(colour_1d,         subset=["1D %"])
-                .map(colour_prem_yield, subset=prem_yield_cols)
-                .format(fmt, na_rep="—")
-            )
+            cols = set(df_show.columns)
+            styled = df_show.style
+            if "IV Rank %"   in cols: styled = styled.map(colour_ivr,        subset=["IV Rank %"])
+            if "Action"      in cols: styled = styled.map(colour_action,     subset=["Action"])
+            if "IV−HV Gap"   in cols: styled = styled.map(colour_gap,        subset=["IV−HV Gap"])
+            if "IV vs 20D"   in cols: styled = styled.map(colour_vs20d,      subset=["IV vs 20D"])
+            if "OI Rank %"   in cols: styled = styled.map(colour_oi_rank,    subset=["OI Rank %"])
+            if "1D %"        in cols: styled = styled.map(colour_1d,         subset=["1D %"])
+            if "Prem Yield%" in cols: styled = styled.map(colour_prem_yield, subset=["Prem Yield%"])
+            fmt_filtered = {k: v for k, v in fmt.items() if k in cols}
+            styled = styled.format(fmt_filtered, na_rep="—")
             st.dataframe(styled, use_container_width=True, height=620, hide_index=True)
 
             csv = df_show.to_csv(index=False)
