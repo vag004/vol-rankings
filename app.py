@@ -338,8 +338,9 @@ with tab1:
             except:
                 continue
 
-        qualifying = [s for s, v in hv_rows.items() if v.get("hv_ivr") is not None and v["hv_ivr"] >= min_ivr]
-        status_txt.text(f"{len(qualifying)} tickers passed filter — fetching live IV + OI…")
+        # Fetch IV for all tickers — apply IVR filter after getting real IV data
+        qualifying = list(hv_rows.keys())
+        status_txt.text(f"{len(qualifying)} tickers — fetching live IV + OI…")
 
         iv_hist = load_iv_history()
 
