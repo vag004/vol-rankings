@@ -26,22 +26,31 @@ st.caption("IV30 · IV Rank · 20D Hist IV · 52wk Position · OI Rank — Marke
 
 # ── Universe ────────────────────────────────────────────────────────────────
 UNIVERSE = [
-    # Mega-cap tech (liquid, high enough IV)
+    # Mega-cap tech
     "NVDA","META","TSLA","AMZN","MSFT","AAPL","GOOGL","AVGO","AMD",
-    # High-vol momentum / AI
-    "PLTR","ARM","SMCI","MU","APP","RDDT","IONQ","HIMS",
-    # Crypto proxies (highest premium)
-    "COIN","MSTR","MARA","RIOT","CLSK","HUT","HOOD","IBIT",
-    # Growth / fintech
-    "AFRM","SOFI","DKNG","PYPL","UBER","SNAP","RBLX","NFLX",
-    # Biotech (event-driven IV)
-    "LLY","MRNA","BNTX",
+    # Semiconductors
+    "MU","ARM","SMCI","INTC","MRVL","QCOM","ON","WOLF",
+    # AI / cloud / software
+    "PLTR","APP","RDDT","SNOW","NET","CRWD","DDOG","ZS","OKTA",
+    "SHOP","MELI","SE","ABNB","DASH","LYFT",
+    # Quantum / deep tech
+    "IONQ","RGTI","QUBT",
+    # Healthcare / biotech
+    "HIMS","LLY","MRNA","BNTX","NVAX","CELH","GEHC",
+    # Crypto proxies
+    "COIN","MSTR","MARA","RIOT","CLSK","HUT","HOOD","IBIT","CIFR",
+    # Fintech / consumer finance
+    "AFRM","SOFI","DKNG","PYPL","SQ","UPST","NU",
+    # Growth / consumer
+    "UBER","SNAP","RBLX","NFLX","SPOT","PINS","BMBL",
+    # EV / energy
+    "RIVN","NIO","LCID","CHPT","BLNK",
+    # China tech
+    "BABA","JD","PDD","BIDU",
     # Leveraged ETFs (very high IV)
-    "SOXL","TQQQ","ARKK",
-    # China tech (volatile)
-    "BABA","NIO",
-    # EV
-    "RIVN",
+    "SOXL","TQQQ","ARKK","LABU",
+    # Special situations / high IV
+    "GME","AMC","CVNA","BYND","OPEN",
 ]
 UNIVERSE = list(dict.fromkeys(UNIVERSE))
 
