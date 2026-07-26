@@ -26,16 +26,22 @@ st.caption("IV30 · IV Rank · 20D Hist IV · 52wk Position · OI Rank — Marke
 
 # ── Universe ────────────────────────────────────────────────────────────────
 UNIVERSE = [
-    "AAPL","MSFT","NVDA","GOOGL","META","AMZN","TSLA","AVGO","AMD","INTC",
-    "COIN","MSTR","PLTR","ARM","SMCI","MU","AFRM","SOFI","HOOD","DKNG",
-    "MARA","RIOT","CLSK","HUT",
-    "NFLX","PYPL","UBER","SNAP","RBLX",
-    "LLY","PFE","ABBV","MRNA","BNTX",
-    "JPM","GS","BAC","MS",
-    "XOM","CVX","XLE",
-    "BABA","JD","NIO",
-    "RIVN","LCID",
-    "SPY","QQQ","IWM","GLD","SLV","ARKK","SOXL","TQQQ",
+    # Mega-cap tech (liquid, high enough IV)
+    "NVDA","META","TSLA","AMZN","MSFT","AAPL","GOOGL","AVGO","AMD",
+    # High-vol momentum / AI
+    "PLTR","ARM","SMCI","MU","APP","RDDT","IONQ","HIMS",
+    # Crypto proxies (highest premium)
+    "COIN","MSTR","MARA","RIOT","CLSK","HUT","HOOD","IBIT",
+    # Growth / fintech
+    "AFRM","SOFI","DKNG","PYPL","UBER","SNAP","RBLX","NFLX",
+    # Biotech (event-driven IV)
+    "LLY","MRNA","BNTX",
+    # Leveraged ETFs (very high IV)
+    "SOXL","TQQQ","ARKK",
+    # China tech (volatile)
+    "BABA","NIO",
+    # EV
+    "RIVN",
 ]
 UNIVERSE = list(dict.fromkeys(UNIVERSE))
 
@@ -156,7 +162,7 @@ with st.sidebar:
     min_iv_hv_gap   = st.slider("Min IV−HV Gap (pts)",  0, 30,  5,   help="IV30 must exceed 20D HV by at least this many vol points")
     min_iv_vs_20d   = st.slider("Min IV vs 20D Hist IV",  -20, 20, 0, help="IV30 vs its own 20-day average — positive = currently elevated")
     min_oi_rank     = st.slider("Min OI Rank %",         0, 100, 0,  help="Minimum open interest rank for liquidity (0 = no filter)")
-    min_prem_yield  = st.slider("Min Prem Yield % (ann.)",0, 30,  0,  help="Annualised yield on the 25-delta put: (bid/strike) × (365/DTE). Filter out low-premium setups.")
+    min_prem_yield  = st.slider("Min Prem Yield % (ann.)",0, 30, 10,  help="Annualised yield on the 25-delta put: (bid/strike) × (365/DTE). Filter out low-premium setups.")
     earn_buffer     = st.slider("Earnings buffer (days)", 0, 21, 7,  help="Avoid tickers with earnings within this many days")
 
     st.divider()
