@@ -331,6 +331,64 @@ tab1, tab2, tab3 = st.tabs(["📊 Vol Rankings", "📅 Earnings Calendar", "📰
 
 # ════════════════════════════════════════════════════════════════════════════
 with tab1:
+
+    with st.expander("📘 Strategy Guide — How to read this scanner", expanded=False):
+        st.markdown("""
+### The idea: sell put options where the premium justifies the risk
+
+When you sell a put, you collect cash upfront. If the stock stays above your strike, you keep it all.
+If it falls below, you buy the stock at the strike — so only sell puts on stocks you'd want to own.
+
+---
+
+#### 🎯 Primary filter — Is the premium worth it?
+
+| Metric | What it measures | Green zone | Red zone |
+|---|---|---|---|
+| **Prem Yield%** | Annualised return: `(bid/strike) × (365/DTE)` — what you earn on capital at risk | ≥ 15% | < 8% |
+| **Put Bid** | The actual cash you collect per contract (×100 shares) | Higher = better | — |
+| **25D Strike** | The strike at ~25% probability of assignment — standard sweet spot | 10-20% OTM | — |
+| **Spread%** | Bid-ask spread as % of mid price — liquidity quality | < 10% | > 25% |
+
+---
+
+#### 📊 Technical signals — Is now a good time to sell?
+
+| Metric | What it measures | Sweet spot | Avoid |
+|---|---|---|---|
+| **RSI (14)** | Momentum — is the stock oversold (fear) or overbought? | 30–55: fear dip | < 25: panic collapse · > 70: overextended |
+| **30D Ret%** | How much the stock has pulled back in a month | -8% to -25%: fear premium elevated | < -35%: possible structural break |
+| **vs 50MA%** | Distance above/below the 50-day moving average | Above 0%: uptrend | Far below: downtrend, avoid |
+| **P/C Ratio** | Put-to-call volume ratio — high = everyone buying puts = elevated premium | > 1.0: fear-driven IV | < 0.5: complacency |
+
+---
+
+#### 📈 Volatility context — Why is IV elevated?
+
+| Metric | What it measures | Good to see | Concerning |
+|---|---|---|---|
+| **IV30** | Implied vol of the 30-day ATM put — the market's fear gauge | Elevated but not crisis | Very low = no premium |
+| **20D HV** | Actual realised volatility over past 20 days | Lower than IV30 = VRP edge | Higher than IV30 = stock moves more than you're paid for |
+| **IV−HV Gap** | IV30 minus HV20 — the volatility risk premium you collect | ≥ +5 pts | Negative = selling cheap |
+| **IV Rank%** | Where today's IV sits in its 52-week range | > 50%: historically elevated | < 30%: IV near yearly lows |
+
+---
+
+#### 🚦 Signal logic (Catalyst → Action)
+
+| Signal | Meaning |
+|---|---|
+| 🟢 **SELL PUTS** | Yield ≥ threshold · RSI 30-60 · trend intact · IV elevated above HV |
+| 😨 **SELL PUTS** (Fear dip) | Yield ≥ threshold · RSI 30-55 · stock down 8-25% — selling into panic |
+| 🔥 **SELL NOW** (Post-earnings) | Earnings just passed, binary risk gone, IV still elevated — best window |
+| ⏳ **MONITOR** | Some conditions met but not all — watch for entry |
+| 🚫 **AVOID** | Earnings within buffer · RSI < 25 · stock down > 35% |
+
+---
+
+> **Rule of thumb:** A good put-sell setup = stock you'd want to own + Prem Yield ≥ 15% + RSI 30-55 + no earnings within 7 days
+""")
+
     if run_btn:
         rows = []
         prog = st.progress(0, "Loading price history…")
