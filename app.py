@@ -353,60 +353,89 @@ with tab1:
 
     with st.expander("📘 Strategy Guide — How to read this scanner", expanded=False):
         st.markdown("""
-### The idea: sell put options where the premium justifies the risk
+<div style="background:#1a1d27;border-radius:12px;padding:20px 24px;color:#e2e8f0">
 
-When you sell a put, you collect cash upfront. If the stock stays above your strike, you keep it all.
-If it falls below, you buy the stock at the strike — so only sell puts on stocks you'd want to own.
+<h3 style="color:#60a5fa;margin-top:0">The idea: sell put options where the premium justifies the risk</h3>
 
----
+<p style="color:#94a3b8">When you sell a put, you collect cash upfront. If the stock stays above your strike, you keep it all.
+If it falls below, you buy the stock at the strike — so <strong style="color:#e2e8f0">only sell puts on stocks you'd want to own</strong>.</p>
 
-#### 🎯 Primary filter — Is the premium worth it?
+<hr style="border-color:#2d3748;margin:16px 0">
 
-| Metric | What it measures | Green zone | Red zone |
-|---|---|---|---|
-| **Prem Yield%** | Annualised return: `(bid/strike) × (365/DTE)` — what you earn on capital at risk | ≥ 15% | < 8% |
-| **Put Bid** | The actual cash you collect per contract (×100 shares) | Higher = better | — |
-| **25D Strike** | The strike at ~25% probability of assignment — standard sweet spot | 10-20% OTM | — |
-| **Spread%** | Bid-ask spread as % of mid price — liquidity quality | < 10% | > 25% |
+<h4 style="color:#fbbf24">🎯 Primary filter — Is the premium worth it?</h4>
 
----
+<table style="width:100%;border-collapse:collapse;font-size:0.88em">
+<tr style="background:#252836">
+  <th style="padding:8px 12px;text-align:left;color:#94a3b8;border-bottom:1px solid #2d3748">Metric</th>
+  <th style="padding:8px 12px;text-align:left;color:#94a3b8;border-bottom:1px solid #2d3748">What it measures</th>
+  <th style="padding:8px 12px;text-align:left;color:#4ade80;border-bottom:1px solid #2d3748">Green zone</th>
+  <th style="padding:8px 12px;text-align:left;color:#f87171;border-bottom:1px solid #2d3748">Red zone</th>
+</tr>
+<tr style="border-bottom:1px solid #2d3748"><td style="padding:7px 12px"><strong style="color:#e2e8f0">Prem Yield%</strong></td><td style="padding:7px 12px;color:#94a3b8">Annualised return: (bid/strike) × (365/DTE)</td><td style="padding:7px 12px;color:#4ade80">≥ 15%</td><td style="padding:7px 12px;color:#f87171">< 8%</td></tr>
+<tr style="border-bottom:1px solid #2d3748;background:#1e2130"><td style="padding:7px 12px"><strong style="color:#e2e8f0">Put Bid</strong></td><td style="padding:7px 12px;color:#94a3b8">Cash collected per contract (×100 shares)</td><td style="padding:7px 12px;color:#4ade80">Higher = better</td><td style="padding:7px 12px;color:#f87171">—</td></tr>
+<tr style="border-bottom:1px solid #2d3748"><td style="padding:7px 12px"><strong style="color:#e2e8f0">25D Strike</strong></td><td style="padding:7px 12px;color:#94a3b8">Strike at ~25% probability of assignment</td><td style="padding:7px 12px;color:#4ade80">10–20% OTM</td><td style="padding:7px 12px;color:#f87171">—</td></tr>
+<tr style="border-bottom:1px solid #2d3748;background:#1e2130"><td style="padding:7px 12px"><strong style="color:#e2e8f0">Spread%</strong></td><td style="padding:7px 12px;color:#94a3b8">Bid-ask spread as % of mid — liquidity quality</td><td style="padding:7px 12px;color:#4ade80">< 10%</td><td style="padding:7px 12px;color:#f87171">> 25%</td></tr>
+</table>
 
-#### 📊 Technical signals — Is now a good time to sell?
+<hr style="border-color:#2d3748;margin:16px 0">
 
-| Metric | What it measures | Sweet spot | Avoid |
-|---|---|---|---|
-| **RSI (14)** | Momentum — is the stock oversold (fear) or overbought? | 30–55: fear dip | < 25: panic collapse · > 70: overextended |
-| **30D Ret%** | How much the stock has pulled back in a month | -8% to -25%: fear premium elevated | < -35%: possible structural break |
-| **vs 50MA%** | Distance above/below the 50-day moving average | Above 0%: uptrend | Far below: downtrend, avoid |
-| **P/C Ratio** | Put-to-call volume ratio — high = everyone buying puts = elevated premium | > 1.0: fear-driven IV | < 0.5: complacency |
+<h4 style="color:#fbbf24">📊 Technical signals — Is now a good time to sell?</h4>
 
----
+<table style="width:100%;border-collapse:collapse;font-size:0.88em">
+<tr style="background:#252836">
+  <th style="padding:8px 12px;text-align:left;color:#94a3b8;border-bottom:1px solid #2d3748">Metric</th>
+  <th style="padding:8px 12px;text-align:left;color:#94a3b8;border-bottom:1px solid #2d3748">What it measures</th>
+  <th style="padding:8px 12px;text-align:left;color:#4ade80;border-bottom:1px solid #2d3748">Sweet spot</th>
+  <th style="padding:8px 12px;text-align:left;color:#f87171;border-bottom:1px solid #2d3748">Avoid</th>
+</tr>
+<tr style="border-bottom:1px solid #2d3748"><td style="padding:7px 12px"><strong style="color:#e2e8f0">RSI (14)</strong></td><td style="padding:7px 12px;color:#94a3b8">Momentum — oversold (fear) or overbought?</td><td style="padding:7px 12px;color:#4ade80">30–55: fear dip</td><td style="padding:7px 12px;color:#f87171">< 25 panic · > 70 overbought</td></tr>
+<tr style="border-bottom:1px solid #2d3748;background:#1e2130"><td style="padding:7px 12px"><strong style="color:#e2e8f0">30D Ret%</strong></td><td style="padding:7px 12px;color:#94a3b8">How much the stock pulled back in 30 days</td><td style="padding:7px 12px;color:#4ade80">-8% to -25%</td><td style="padding:7px 12px;color:#f87171">< -35%: structural break</td></tr>
+<tr style="border-bottom:1px solid #2d3748"><td style="padding:7px 12px"><strong style="color:#e2e8f0">vs 50MA%</strong></td><td style="padding:7px 12px;color:#94a3b8">Distance above/below 50-day moving average</td><td style="padding:7px 12px;color:#4ade80">Above 0%: uptrend</td><td style="padding:7px 12px;color:#f87171">Far below: downtrend</td></tr>
+<tr style="border-bottom:1px solid #2d3748;background:#1e2130"><td style="padding:7px 12px"><strong style="color:#e2e8f0">P/C Ratio</strong></td><td style="padding:7px 12px;color:#94a3b8">Put-to-call volume — fear proxy</td><td style="padding:7px 12px;color:#4ade80">> 1.0: fear-driven IV</td><td style="padding:7px 12px;color:#f87171">< 0.5: complacency</td></tr>
+</table>
 
-#### 📈 Volatility context — Why is IV elevated?
+<hr style="border-color:#2d3748;margin:16px 0">
 
-| Metric | What it measures | Good to see | Concerning |
-|---|---|---|---|
-| **IV30** | Implied vol of the 30-day ATM put — the market's fear gauge | Elevated but not crisis | Very low = no premium |
-| **20D HV** | Actual realised volatility over past 20 days | Lower than IV30 = VRP edge | Higher than IV30 = stock moves more than you're paid for |
-| **IV−HV Gap** | IV30 minus HV20 — the volatility risk premium you collect | ≥ +5 pts | Negative = selling cheap |
-| **IV Rank%** | Where today's IV sits in its 52-week range | > 50%: historically elevated | < 30%: IV near yearly lows |
+<h4 style="color:#fbbf24">📈 Volatility context — Why is IV elevated?</h4>
 
----
+<table style="width:100%;border-collapse:collapse;font-size:0.88em">
+<tr style="background:#252836">
+  <th style="padding:8px 12px;text-align:left;color:#94a3b8;border-bottom:1px solid #2d3748">Metric</th>
+  <th style="padding:8px 12px;text-align:left;color:#94a3b8;border-bottom:1px solid #2d3748">What it measures</th>
+  <th style="padding:8px 12px;text-align:left;color:#4ade80;border-bottom:1px solid #2d3748">Good to see</th>
+  <th style="padding:8px 12px;text-align:left;color:#f87171;border-bottom:1px solid #2d3748">Concerning</th>
+</tr>
+<tr style="border-bottom:1px solid #2d3748"><td style="padding:7px 12px"><strong style="color:#e2e8f0">IV30</strong></td><td style="padding:7px 12px;color:#94a3b8">Implied vol of 30-day ATM put — fear gauge</td><td style="padding:7px 12px;color:#4ade80">Elevated but not crisis</td><td style="padding:7px 12px;color:#f87171">Very low = no premium</td></tr>
+<tr style="border-bottom:1px solid #2d3748;background:#1e2130"><td style="padding:7px 12px"><strong style="color:#e2e8f0">20D HV</strong></td><td style="padding:7px 12px;color:#94a3b8">Actual realised vol over past 20 days</td><td style="padding:7px 12px;color:#4ade80">Lower than IV30 = VRP edge</td><td style="padding:7px 12px;color:#f87171">Higher than IV30 = selling cheap</td></tr>
+<tr style="border-bottom:1px solid #2d3748"><td style="padding:7px 12px"><strong style="color:#e2e8f0">IV−HV Gap</strong></td><td style="padding:7px 12px;color:#94a3b8">IV30 minus HV20 — the VRP premium</td><td style="padding:7px 12px;color:#4ade80">≥ +5 pts</td><td style="padding:7px 12px;color:#f87171">Negative = vol risk uncompensated</td></tr>
+<tr style="border-bottom:1px solid #2d3748;background:#1e2130"><td style="padding:7px 12px"><strong style="color:#e2e8f0">IV Rank%</strong></td><td style="padding:7px 12px;color:#94a3b8">Where today's IV sits in its 52-week range</td><td style="padding:7px 12px;color:#4ade80">> 50%: historically elevated</td><td style="padding:7px 12px;color:#f87171">< 30%: IV near yearly lows</td></tr>
+</table>
 
-#### 🚦 Signal logic (Catalyst → Action)
+<hr style="border-color:#2d3748;margin:16px 0">
 
-| Signal | Meaning |
-|---|---|
-| 🟢 **SELL PUTS** | Yield ≥ threshold · RSI 30-60 · trend intact · IV elevated above HV |
-| 😨 **SELL PUTS** (Fear dip) | Yield ≥ threshold · RSI 30-55 · stock down 8-25% — selling into panic |
-| 🔥 **SELL NOW** (Post-earnings) | Earnings just passed, binary risk gone, IV still elevated — best window |
-| ⏳ **MONITOR** | Some conditions met but not all — watch for entry |
-| 🚫 **AVOID** | Earnings within buffer · RSI < 25 · stock down > 35% |
+<h4 style="color:#fbbf24">🚦 Signal logic (Catalyst → Action)</h4>
 
----
+<table style="width:100%;border-collapse:collapse;font-size:0.88em">
+<tr style="background:#252836">
+  <th style="padding:8px 12px;text-align:left;color:#94a3b8;border-bottom:1px solid #2d3748">Signal</th>
+  <th style="padding:8px 12px;text-align:left;color:#94a3b8;border-bottom:1px solid #2d3748">Meaning</th>
+</tr>
+<tr style="border-bottom:1px solid #2d3748"><td style="padding:7px 12px;color:#4ade80;font-weight:bold">🟢 SELL PUTS</td><td style="padding:7px 12px;color:#94a3b8">Yield ≥ threshold · RSI 30-60 · trend intact · IV elevated above HV</td></tr>
+<tr style="border-bottom:1px solid #2d3748;background:#1e2130"><td style="padding:7px 12px;color:#4ade80;font-weight:bold">😨 SELL PUTS (Fear dip)</td><td style="padding:7px 12px;color:#94a3b8">Yield OK · RSI 30-55 · stock down 8-25% — selling into panic, best setups</td></tr>
+<tr style="border-bottom:1px solid #2d3748"><td style="padding:7px 12px;color:#4ade80;font-weight:bold">🔥 SELL NOW (Post-earnings)</td><td style="padding:7px 12px;color:#94a3b8">Earnings just passed, binary risk gone, IV still elevated — best window</td></tr>
+<tr style="border-bottom:1px solid #2d3748;background:#1e2130"><td style="padding:7px 12px;color:#facc15;font-weight:bold">⏳ MONITOR</td><td style="padding:7px 12px;color:#94a3b8">Some conditions met but not all — watch for better entry</td></tr>
+<tr style="border-bottom:1px solid #2d3748"><td style="padding:7px 12px;color:#f87171;font-weight:bold">🚫 AVOID</td><td style="padding:7px 12px;color:#94a3b8">Earnings within buffer · RSI < 25 · stock down > 35% — too risky</td></tr>
+</table>
 
-> **Rule of thumb:** A good put-sell setup = stock you'd want to own + Prem Yield ≥ 15% + RSI 30-55 + no earnings within 7 days
-""")
+<hr style="border-color:#2d3748;margin:16px 0">
+
+<div style="background:#1e3a2f;border-left:3px solid #4ade80;padding:10px 16px;border-radius:6px">
+<strong style="color:#4ade80">Rule of thumb:</strong>
+<span style="color:#94a3b8"> A good setup = stock you'd want to own + Prem Yield ≥ 15% + RSI 30-55 + no earnings within 7 days</span>
+</div>
+
+</div>
+""", unsafe_allow_html=True)
 
     if run_btn:
         rows = []
