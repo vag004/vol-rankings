@@ -40,7 +40,7 @@ UNIVERSE = [
     # Crypto proxies
     "COIN","MSTR","MARA","RIOT","CLSK","HUT","HOOD","IBIT","CIFR",
     # Fintech / consumer finance
-    "AFRM","SOFI","DKNG","PYPL","SQ","UPST","NU",
+    "AFRM","SOFI","DKNG","PYPL","UPST","NU",
     # Growth / consumer
     "UBER","SNAP","RBLX","NFLX","SPOT","PINS","BMBL",
     # EV / energy
