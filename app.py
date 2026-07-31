@@ -477,38 +477,49 @@ def run_scan(universe_list, cache_key, tier_map=None):
     return rows
 
 # ── Display logic (shared) ────────────────────────────────────────────────────
-def display_results(rows, show_tier=False):
-    """Render the results table given a list of row dicts."""
+def display_results(rows, show_tier=False, show_all=False):
+    """Render the results table given a list of row dicts.
+    show_all=True: skip sidebar filters, show every stock, sort sells to top.
+    """
     if not rows:
         st.info("👈 Click **Refresh** to load the volatility table.")
         return
 
     df = pd.DataFrame(rows)
 
-    if show_filter == "✅ Sell signals only":
-        df = df[df["Action"].str.contains("SELL|🔥", na=False)]
-    elif show_filter == "🚫 Avoid (earnings soon)":
-        df = df[df["Action"].str.contains("AVOID", na=False)]
+    if show_all:
+        # Sort order: sells first, then monitors, then avoids — within each group by Prem Yield%
+        def action_rank(a):
+            if "SELL" in str(a) or "🔥" in str(a): return 0
+            if "MONITOR" in str(a) or "CAUTION" in str(a): return 1
+            return 2
+        df["_rank"] = df["Action"].apply(action_rank)
+        df = df.sort_values(["_rank", "Prem Yield%"], ascending=[True, False]).drop(columns=["_rank"]).reset_index(drop=True)
+    else:
+        if show_filter == "✅ Sell signals only":
+            df = df[df["Action"].str.contains("SELL|🔥", na=False)]
+        elif show_filter == "🚫 Avoid (earnings soon)":
+            df = df[df["Action"].str.contains("AVOID", na=False)]
 
-    if min_prem_yield > 0 and "Prem Yield%" in df.columns:
-        df = df[df["Prem Yield%"].fillna(0) >= min_prem_yield]
-    if min_mktcap_b > 0 and "Mkt Cap $B" in df.columns:
-        df = df[df["Mkt Cap $B"].fillna(0) >= min_mktcap_b]
-    if max_spread_pct < 50 and "Spread%" in df.columns:
-        df = df[df["Spread%"].fillna(999) <= max_spread_pct]
-    if min_rsi > 0 and "RSI" in df.columns:
-        df = df[df["RSI"].fillna(0) >= min_rsi]
-    if max_rsi < 100 and "RSI" in df.columns:
-        df = df[df["RSI"].fillna(100) <= max_rsi]
-    if max_ret_30d < 0 and "30D Ret%" in df.columns:
-        df = df[df["30D Ret%"].fillna(0) <= max_ret_30d]
+        if min_prem_yield > 0 and "Prem Yield%" in df.columns:
+            df = df[df["Prem Yield%"].fillna(0) >= min_prem_yield]
+        if min_mktcap_b > 0 and "Mkt Cap $B" in df.columns:
+            df = df[df["Mkt Cap $B"].fillna(0) >= min_mktcap_b]
+        if max_spread_pct < 50 and "Spread%" in df.columns:
+            df = df[df["Spread%"].fillna(999) <= max_spread_pct]
+        if min_rsi > 0 and "RSI" in df.columns:
+            df = df[df["RSI"].fillna(0) >= min_rsi]
+        if max_rsi < 100 and "RSI" in df.columns:
+            df = df[df["RSI"].fillna(100) <= max_rsi]
+        if max_ret_30d < 0 and "30D Ret%" in df.columns:
+            df = df[df["30D Ret%"].fillna(0) <= max_ret_30d]
 
-    if df.empty:
-        st.warning("No rows match current filters.")
-        return
+        if df.empty:
+            st.warning("No rows match current filters.")
+            return
 
-    sort_col = "Prem Yield%" if "Prem Yield%" in df.columns else df.columns[0]
-    df = df.sort_values(sort_col, ascending=False).reset_index(drop=True)
+        sort_col = "Prem Yield%" if "Prem Yield%" in df.columns else df.columns[0]
+        df = df.sort_values(sort_col, ascending=False).reset_index(drop=True)
 
     sells    = df["Action"].str.contains("SELL|🔥", na=False).sum()
     avoids   = df["Action"].str.contains("AVOID|WAIT", na=False).sum()
@@ -808,7 +819,7 @@ The put-selling edge here is lower premium than the vol universe — but the fun
         quality_rows = []
         st.info("Click **Refresh Quality Universe** above to load the quality table.")
 
-    display_results(quality_rows, show_tier=True)
+    display_results(quality_rows, show_tier=True, show_all=True)
 
 # ════════════════════════════════════════════════════════════════════════════
 with tab3:
