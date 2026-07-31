@@ -182,8 +182,6 @@ with st.sidebar:
     st.header("⚙️ Filters")
     show_filter = st.selectbox("Show", ["All", "✅ Sell signals only", "🚫 Avoid (earnings soon)"])
     custom_add  = st.text_input("Add tickers (comma-sep)", "")
-    run_btn     = st.button("🔄 Refresh Vol Universe", use_container_width=True)
-    run_quality = st.button("🔄 Refresh Quality Universe", use_container_width=True)
 
     st.divider()
     st.subheader("📐 Filters")
@@ -206,6 +204,7 @@ with st.sidebar:
     if cache_ok(cache, "quality_rankings"):
         age = int((time.time() - cache["quality_rankings"]["_ts"]) / 60)
         st.caption(f"Quality cache: {age} min old")
+    st.caption("↑ Refresh buttons are inside each tab")
     iv_hist = load_iv_history()
     all_tickers = list(dict.fromkeys(UNIVERSE + QUALITY_UNIVERSE))
     tracked = sum(1 for sym in all_tickers if len(iv_hist.get(sym, [])) > 0)
@@ -756,6 +755,8 @@ If it falls below, you buy the stock at the strike — so <strong style="color:#
 </div>
 """, unsafe_allow_html=True)
 
+    run_btn = st.button("🔄 Refresh Vol Universe", use_container_width=True, key="run_vol")
+
     if run_btn:
         rows = run_scan(universe, "rankings")
         cache["rankings"] = {"data": rows, "_ts": time.time()}
@@ -793,6 +794,8 @@ The put-selling edge here is lower premium than the vol universe — but the fun
 </div>
 """, unsafe_allow_html=True)
 
+    run_quality = st.button("🔄 Refresh Quality Universe", use_container_width=True, key="run_quality")
+
     if run_quality:
         quality_rows = run_scan(QUALITY_UNIVERSE, "quality_rankings", tier_map=QUALITY_TIERS)
         cache["quality_rankings"] = {"data": quality_rows, "_ts": time.time()}
@@ -803,7 +806,7 @@ The put-selling edge here is lower premium than the vol universe — but the fun
         st.info(f"Showing cached data from {age} min ago. Hit **Refresh Quality Universe** to update.")
     else:
         quality_rows = []
-        st.info("👈 Click **Refresh Quality Universe** in the sidebar to load the quality table.")
+        st.info("Click **Refresh Quality Universe** above to load the quality table.")
 
     display_results(quality_rows, show_tier=True)
 
