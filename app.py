@@ -252,7 +252,7 @@ def get_iv30_and_oi(tk, price):
         total_call_vol, total_put_vol = 0, 0
         iv30, iv_dte = None, None
         target_put = None
-        for exp in tk.options[:5]:
+        for exp in tk.options[:10]:
             dte = (datetime.strptime(exp, "%Y-%m-%d").date() - today).days
             if dte > 75:
                 break
