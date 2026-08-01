@@ -485,7 +485,7 @@ def run_scan(universe_list, cache_key, tier_map=None):
     return rows
 
 # ── Display logic (shared) ────────────────────────────────────────────────────
-def display_results(rows, show_tier=False, show_all=False):
+def display_results(rows, show_tier=False, show_all=False, dl_key="dl_csv"):
     """Render the results table given a list of row dicts.
     show_all=True: skip sidebar filters, show every stock, sort sells to top.
     """
@@ -680,7 +680,7 @@ def display_results(rows, show_tier=False, show_all=False):
     st.dataframe(styled, use_container_width=True, height=620, hide_index=True)
 
     csv = df_show.to_csv(index=False)
-    st.download_button("⬇ Download CSV", csv, "vol_rankings.csv", "text/csv")
+    st.download_button("⬇ Download CSV", csv, "vol_rankings.csv", "text/csv", key=dl_key)
 
 # ── Sector Momentum Data ─────────────────────────────────────────────────────
 SECTORS = [
@@ -871,7 +871,7 @@ If it falls below, you buy the stock at the strike — so <strong style="color:#
     else:
         rows = []
 
-    display_results(rows, show_tier=False)
+    display_results(rows, show_tier=False, dl_key="dl_vol")
 
 # ════════════════════════════════════════════════════════════════════════════
 with tab2:
@@ -911,7 +911,7 @@ The put-selling edge here is lower premium than the vol universe — but the fun
         quality_rows = []
         st.info("Click **Refresh Quality Universe** above to load the quality table.")
 
-    display_results(quality_rows, show_tier=True, show_all=True)
+    display_results(quality_rows, show_tier=True, show_all=True, dl_key="dl_quality")
 
 # ════════════════════════════════════════════════════════════════════════════
 with tab3:
