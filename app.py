@@ -29,10 +29,14 @@ UNIVERSE = [
     # Mega-cap tech
     "NVDA","META","TSLA","AMZN","MSFT","AAPL","GOOGL","AVGO","AMD",
     # Semiconductors
-    "MU","ARM","SMCI","INTC","MRVL","QCOM","ON","WOLF",
+    "MU","ARM","SMCI","INTC","MRVL","QCOM","ON","WOLF","DELL","ANET","HPE",
     # AI / cloud / software
     "PLTR","APP","RDDT","SNOW","NET","CRWD","DDOG","ZS","OKTA",
     "SHOP","MELI","SE","ABNB","DASH","LYFT",
+    # Enterprise SaaS
+    "CRM","NOW","WDAY","HUBS","MDB","TEAM","PATH","GTLB","CFLT","ZI","DOCN",
+    # Cybersecurity
+    "PANW","S","CYBR",
     # Quantum / deep tech
     "IONQ","RGTI","QUBT",
     # Healthcare / biotech
@@ -47,6 +51,10 @@ UNIVERSE = [
     "RIVN","NIO","LCID","CHPT","BLNK",
     # China tech
     "BABA","JD","PDD","BIDU",
+    # Nuclear / power (AI data centre demand)
+    "VST","CEG","NRG","SMR","OKLO",
+    # Defence / aerospace
+    "LMT","RTX","NOC",
     # Leveraged ETFs (very high IV)
     "SOXL","TQQQ","ARKK","LABU",
     # Special situations / high IV
@@ -674,8 +682,92 @@ def display_results(rows, show_tier=False, show_all=False):
     csv = df_show.to_csv(index=False)
     st.download_button("⬇ Download CSV", csv, "vol_rankings.csv", "text/csv")
 
+# ── Sector Momentum Data ─────────────────────────────────────────────────────
+SECTORS = [
+    # theme                    etf      individual names for context
+    ("🤖 AI / Semis",         "SMH",   ["NVDA","AVGO","AMD","ARM","MU"]),
+    ("☁️ Cloud / SaaS",       "WCLD",  ["NOW","SNOW","DDOG","NET","CRWD"]),
+    ("🔐 Cybersecurity",      "HACK",  ["CRWD","PANW","ZS","CYBR","S"]),
+    ("₿ Crypto",              "BITO",  ["COIN","MSTR","MARA","RIOT","IBIT"]),
+    ("⚡ Nuclear / Power",    "URNM",  ["VST","CEG","SMR","OKLO","NRG"]),
+    ("🛡️ Defence",            "ITA",   ["LMT","RTX","NOC","PLTR","HII"]),
+    ("🏭 Reshoring / Indust", "XLI",   ["GE","ETN","PWR","HUBB","MMM"]),
+    ("💊 Biotech",            "XBI",   ["MRNA","BNTX","NVAX","CELH","HIMS"]),
+    ("🚗 EV / Clean Energy",  "DRIV",  ["TSLA","RIVN","NIO","CHPT","BLNK"]),
+    ("🇨🇳 China Tech",        "KWEB",  ["BABA","JD","PDD","BIDU","SE"]),
+    ("💳 Fintech",            "FINX",  ["PYPL","AFRM","SOFI","HOOD","NU"]),
+    ("💉 GLP-1 / Health",     "XLV",   ["LLY","NVO","ISRG","GEHC","UNH"]),
+]
+
+def fetch_sector_momentum():
+    """Fetch price momentum for all sector ETFs. Lightweight — no options chain."""
+    etfs = [s[1] for s in SECTORS]
+    raw = yf.download(etfs, period="1y", auto_adjust=True, progress=False)
+    if isinstance(raw.columns, pd.MultiIndex):
+        closes = raw["Close"]
+    else:
+        closes = raw
+
+    rows = []
+    today_idx = -1
+    for theme, etf, names in SECTORS:
+        try:
+            if etf not in closes.columns:
+                continue
+            s = closes[etf].dropna()
+            if len(s) < 65:
+                continue
+            cur   = float(s.iloc[-1])
+            ret1d = round((cur / float(s.iloc[-2]) - 1) * 100, 2) if len(s) >= 2 else None
+            ret1w = round((cur / float(s.iloc[-6]) - 1) * 100, 1) if len(s) >= 6 else None
+            ret1m = round((cur / float(s.iloc[-22]) - 1) * 100, 1) if len(s) >= 22 else None
+            ret3m = round((cur / float(s.iloc[-66]) - 1) * 100, 1) if len(s) >= 66 else None
+            ret6m = round((cur / float(s.iloc[-130]) - 1) * 100, 1) if len(s) >= 130 else None
+            rsi   = calc_rsi(s)
+            ma50  = s.rolling(50).mean().iloc[-1]
+            ma200 = s.rolling(200).mean().iloc[-1]
+            vs50  = round((cur / float(ma50) - 1) * 100, 1) if pd.notna(ma50) else None
+            # 52-week high/low position
+            hi52  = float(s.rolling(252).max().iloc[-1])
+            lo52  = float(s.rolling(252).min().iloc[-1])
+            pct52 = round((cur - lo52) / (hi52 - lo52) * 100, 0) if hi52 > lo52 else None
+
+            # Momentum signal
+            if ret1m is not None and ret3m is not None and rsi is not None:
+                if ret1m > 5 and ret3m > 10 and rsi > 55:
+                    signal = "🔥 Strong"
+                elif ret1m > 0 and ret3m > 0:
+                    signal = "📈 Building"
+                elif ret1m < -5 and ret3m < -10:
+                    signal = "📉 Weak"
+                elif ret1m < 0:
+                    signal = "⚠️ Fading"
+                else:
+                    signal = "➡️ Neutral"
+            else:
+                signal = "—"
+
+            rows.append({
+                "Theme":      theme,
+                "ETF":        etf,
+                "Price":      round(cur, 2),
+                "1D %":       ret1d,
+                "1W %":       ret1w,
+                "1M %":       ret1m,
+                "3M %":       ret3m,
+                "6M %":       ret6m,
+                "RSI":        rsi,
+                "vs 50MA%":   vs50,
+                "52wk Pos%":  pct52,
+                "Key Names":  " · ".join(names),
+                "Momentum":   signal,
+            })
+        except:
+            continue
+    return rows
+
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Vol Rankings", "🏆 Quality Universe", "📅 Earnings Calendar", "📰 News Feed"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Vol Rankings", "🏆 Quality Universe", "🌡️ Sector Momentum", "📅 Earnings Calendar", "📰 News Feed"])
 
 # ════════════════════════════════════════════════════════════════════════════
 with tab1:
@@ -823,6 +915,136 @@ The put-selling edge here is lower premium than the vol universe — but the fun
 
 # ════════════════════════════════════════════════════════════════════════════
 with tab3:
+    st.subheader("🌡️ Sector Momentum — Where Is Money Flowing?")
+    st.caption("Price momentum on 12 themes tracked via ETF proxies. Green themes = hunt for put candidates within them. Red = avoid even if yield looks good.")
+
+    run_sectors = st.button("🔄 Refresh Sector Momentum", use_container_width=True, key="run_sectors")
+
+    sec_cache_key = "sector_momentum"
+    if run_sectors:
+        with st.spinner("Fetching sector ETF data…"):
+            sec_rows = fetch_sector_momentum()
+        cache[sec_cache_key] = {"data": sec_rows, "_ts": time.time()}
+        save_cache(cache)
+    elif cache_ok(cache, sec_cache_key):
+        sec_rows = cache[sec_cache_key]["data"]
+        age = int((time.time() - cache[sec_cache_key]["_ts"]) / 60)
+        st.info(f"Cached {age} min ago — sector data is slow moving, refresh daily is enough.")
+    else:
+        sec_rows = []
+        st.info("Click **Refresh Sector Momentum** above to load the panel.")
+
+    if sec_rows:
+        df_s = pd.DataFrame(sec_rows)
+
+        # Sort: strong first
+        momentum_order = {"🔥 Strong": 0, "📈 Building": 1, "➡️ Neutral": 2, "⚠️ Fading": 3, "📉 Weak": 4, "—": 5}
+        df_s["_ord"] = df_s["Momentum"].map(momentum_order).fillna(5)
+        df_s = df_s.sort_values(["_ord","3M %"], ascending=[True, False]).drop(columns=["_ord"]).reset_index(drop=True)
+
+        # Summary metrics
+        strong = (df_s["Momentum"].str.contains("Strong|Building", na=False)).sum()
+        weak   = (df_s["Momentum"].str.contains("Weak|Fading", na=False)).sum()
+        c1,c2,c3 = st.columns(3)
+        c1.metric("🔥 Strong / Building themes", int(strong))
+        c2.metric("📉 Weak / Fading themes", int(weak))
+        c3.metric("➡️ Neutral", len(df_s) - strong - weak)
+        st.divider()
+
+        def colour_momentum(val):
+            s = str(val)
+            if "Strong"   in s: return "background-color:#14532d;color:#4ade80;font-weight:bold"
+            if "Building" in s: return "background-color:#1a3a1a;color:#86efac"
+            if "Fading"   in s: return "background-color:#4a3a00;color:#facc15"
+            if "Weak"     in s: return "background-color:#450a0a;color:#f87171;font-weight:bold"
+            return "color:#9ca3af"
+
+        def colour_pct(val):
+            if pd.isna(val): return ""
+            v = float(val)
+            if v >= 15: return "color:#4ade80;font-weight:bold"
+            if v >= 5:  return "color:#86efac"
+            if v >= 0:  return "color:#facc15"
+            if v >= -10: return "color:#f87171"
+            return "color:#f87171;font-weight:bold"
+
+        def colour_rsi_s(val):
+            if pd.isna(val): return ""
+            v = float(val)
+            if v >= 60: return "color:#4ade80;font-weight:bold"
+            if v >= 50: return "color:#86efac"
+            if v >= 40: return "color:#facc15"
+            return "color:#f87171"
+
+        def colour_52wk(val):
+            if pd.isna(val): return ""
+            v = float(val)
+            if v >= 75: return "color:#4ade80;font-weight:bold"
+            if v >= 50: return "color:#86efac"
+            if v >= 25: return "color:#facc15"
+            return "color:#f87171"
+
+        fmt_s = {
+            "Price":     "${:.2f}",
+            "1D %":      "{:+.2f}%",
+            "1W %":      lambda x: f"{x:+.1f}%" if pd.notna(x) else "—",
+            "1M %":      lambda x: f"{x:+.1f}%" if pd.notna(x) else "—",
+            "3M %":      lambda x: f"{x:+.1f}%" if pd.notna(x) else "—",
+            "6M %":      lambda x: f"{x:+.1f}%" if pd.notna(x) else "—",
+            "RSI":       lambda x: f"{x:.0f}" if pd.notna(x) else "—",
+            "vs 50MA%":  lambda x: f"{x:+.1f}%" if pd.notna(x) else "—",
+            "52wk Pos%": lambda x: f"{x:.0f}%" if pd.notna(x) else "—",
+        }
+
+        disp_cols = ["Theme","ETF","Price","1D %","1W %","1M %","3M %","6M %","RSI","vs 50MA%","52wk Pos%","Key Names","Momentum"]
+        df_s_show = df_s[[c for c in disp_cols if c in df_s.columns]]
+        cols_s = set(df_s_show.columns)
+
+        styled_s = df_s_show.style
+        for col in ["1D %","1W %","1M %","3M %","6M %","vs 50MA%"]:
+            if col in cols_s: styled_s = styled_s.map(colour_pct, subset=[col])
+        if "RSI"       in cols_s: styled_s = styled_s.map(colour_rsi_s,  subset=["RSI"])
+        if "52wk Pos%" in cols_s: styled_s = styled_s.map(colour_52wk,   subset=["52wk Pos%"])
+        if "Momentum"  in cols_s: styled_s = styled_s.map(colour_momentum, subset=["Momentum"])
+        fmt_s_filtered = {k: v for k, v in fmt_s.items() if k in cols_s}
+        styled_s = styled_s.format(fmt_s_filtered, na_rep="—")
+
+        st.dataframe(styled_s, use_container_width=True, height=500, hide_index=True)
+
+        st.divider()
+
+        # Bar chart: 1M and 3M return by theme
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            name="1M %", x=df_s["Theme"], y=df_s["1M %"],
+            marker_color=["#4ade80" if v >= 0 else "#f87171" for v in df_s["1M %"].fillna(0)],
+            opacity=0.85,
+        ))
+        fig.add_trace(go.Bar(
+            name="3M %", x=df_s["Theme"], y=df_s["3M %"],
+            marker_color=["#60a5fa" if v >= 0 else "#f59e0b" for v in df_s["3M %"].fillna(0)],
+            opacity=0.65,
+        ))
+        fig.update_layout(
+            template="plotly_dark", barmode="group", height=380,
+            title="Sector momentum — 1M vs 3M return",
+            yaxis_title="Return %", xaxis_tickangle=-30,
+            margin=dict(l=40,r=20,t=50,b=120),
+            legend=dict(orientation="h", y=1.1),
+        )
+        fig.add_hline(y=0, line_color="white", opacity=0.3)
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("""
+**How to use this panel:**
+- **🔥 Strong / 📈 Building** → hunt for put candidates in these themes on the Vol Rankings tab
+- **⚠️ Fading / 📉 Weak** → avoid selling puts even if individual stock yield looks good — sector headwind will hurt
+- **52wk Pos%** — how close to the 52-week high. >75% = momentum intact; <25% = sector in a downtrend
+- **RSI > 55** on an ETF = sector trend confirmed, not overbought yet
+""")
+
+# ════════════════════════════════════════════════════════════════════════════
+with tab4:
     st.subheader("📅 Earnings Calendar — Next 60 Days")
 
     today = date.today()
@@ -886,7 +1108,7 @@ with tab3:
         st.info("**Rule:** Never sell puts within 7 days BEFORE earnings. Best window: 1-3 days AFTER — binary risk gone, IV still elevated.")
 
 # ════════════════════════════════════════════════════════════════════════════
-with tab4:
+with tab5:
     st.subheader("📰 News Feed + Sentiment")
     st.caption("Auto-tags headlines as positive / negative / neutral to help understand IV drivers.")
 
